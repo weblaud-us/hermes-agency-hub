@@ -1,0 +1,142 @@
+# Hermes Agency Hub — full stack.
+#
+# The same file serves local development and the VPS; only .env differs.
+# Copy .env.example to .env and fill it in before the first `up`.
+#
+#   docker compose up -d --build
+#   docker compose exec hub alembic upgrade head
+#
+# Pre-pull the agent image once before onboarding anyone — it is several GB,
+# and pulling it lazily inside the first request makes that request look hung:
+#
+#   docker pull nousresearch/hermes-agent:latest
+#
+# ---------------------------------------------------------------------------
+# Why the data root is bind-mounted at the SAME absolute path on both sides
+# ---------------------------------------------------------------------------
+# The hub creates tenant containers through the mounted Docker socket, so it
+# is a *sibling* of what it creates, not a parent. Bind-mount sources in those
+# requests are resolved by the Docker daemon on the host — not inside the hub
+# container. If the hub wrote tenant files to a path only it could see, the
+# daemon would resolve that same string against the host, find nothing, and
+# silently hand the tenant an empty directory.
+#
+# Mounting /srv/hermes-multi at /srv/hermes-multi makes both views agree, so
+# no path translation is needed anywhere. (If you ever cannot do this, set
+# DATA_ROOT_HOST to the host-side path and the hub will translate.)
+
+name: hermes-agency-hub
+
+networks:
+  # Tenants, the hub and nginx all join this. It is how nginx reaches a
+  # tenant by container name and how the hub health-probes one — neither can
+  # use the published 127.0.0.1 ports, which live on the *host's* loopback.
+  hermes-clients:
+    name: hermes-clients
+  hermes-internal:
+    name: hermes-internal
+
+volumes:
+  postgres-data:
+
+services:
+  # ------------------------------------------------------------- database
+  postgres:
+    image: postgres:16-alpine
+    container_name: hermes-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-hermes}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-hermes_hub}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks: [hermes-internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hermes} -d ${POSTGRES_DB:-hermes_hub}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Not published. Nothing outside this compose project needs it; reach it
+    # with `docker compose exec postgres psql`.
+
+  # --------------------------------------------------------- data root init
+  # Runs as root once per `up` to create the data root and hand it to the
+  # hub's unprivileged uid. Without this, a first run on a fresh host leaves
+  # /srv/hermes-multi owned by root and the hub cannot write tenant files.
+  hub-init:
+    image: alpine:3.20
+    container_name: hermes-hub-init
+    user: root
+    volumes:
+      - ${DATA_ROOT:-/srv/hermes-multi}:/data
+    command: >
+      sh -c "mkdir -p /data/tenants /data/archive /data/shared-skills /data/nginx/conf.d
+      && chown -R 10001:10001 /data
+      && chmod 755 /data
+      && echo '[hub-init] data root ready'"
+
+  # ------------------------------------------------------------------- hub
+  hub:
+    build:
+      context: ./backend
+    image: hermes-agency-hub:local
+    container_name: hermes-hub
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      hub-init:
+        condition: service_completed_successfully
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-local}
+      DEBUG: ${DEBUG:-true}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      ADMIN_API_KEY: ${ADMIN_API_KEY:?set ADMIN_API_KEY in .env}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-hermes}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-hermes_hub}
+      BASE_DOMAIN: ${BASE_DOMAIN:-localhost}
+      HUB_PUBLIC_URL: ${HUB_PUBLIC_URL:-http://localhost:8080}
+      CLIENT_IMAGE: ${CLIENT_IMAGE:-nousresearch/hermes-agent:latest}
+      CLIENT_IMAGE_PULL_POLICY: ${CLIENT_IMAGE_PULL_POLICY:-missing}
+      DATA_ROOT: ${DATA_ROOT:-/srv/hermes-multi}
+      # Containerized nginx: reach tenants over the shared Docker network and
+      # drive nginx through `docker exec`. See .env.example for the host-nginx
+      # override set.
+      NGINX_CONTROL_MODE: ${NGINX_CONTROL_MODE:-docker}
+      NGINX_UPSTREAM_MODE: ${NGINX_UPSTREAM_MODE:-network}
+      PROBE_MODE: ${PROBE_MODE:-network}
+      NGINX_CONTAINER_NAME: hermes-nginx
+    volumes:
+      # Creates and manages sibling tenant containers.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Same path both sides — see the header note.
+      - ${DATA_ROOT:-/srv/hermes-multi}:${DATA_ROOT:-/srv/hermes-multi}
+    # The image runs as uid 10001; the socket is group-owned. On Docker
+    # Desktop the socket is root:root, so group 0 is correct. On a Linux VPS
+    # set DOCKER_GID to: stat -c '%g' /var/run/docker.sock
+    group_add:
+      - "${DOCKER_GID:-0}"
+    networks: [hermes-internal, hermes-clients]
+    ports:
+      # Admin API. Loopback-only by default: the control plane should not be
+      # internet-facing. Override HUB_BIND to expose it deliberately.
+      - "${HUB_BIND:-127.0.0.1}:8080:8080"
+
+  # ----------------------------------------------------------------- nginx
+  nginx:
+    image: nginx:alpine
+    # Must match NGINX_CONTAINER_NAME: the hub drives `nginx -t` and reload
+    # by exec'ing into this container by name.
+    container_name: hermes-nginx
+    restart: unless-stopped
+    depends_on:
+      hub-init:
+        condition: service_completed_successfully
+    volumes:
+      # The hub writes tenant sites here; nginx's default config includes
+      # /etc/nginx/conf.d/*.conf, so a written file is a live site after a
+      # reload. Read-only: nginx never needs to modify its own config.
+      - ${DATA_ROOT:-/srv/hermes-multi}/nginx/conf.d:/etc/nginx/conf.d:ro
+    networks: [hermes-clients]
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"

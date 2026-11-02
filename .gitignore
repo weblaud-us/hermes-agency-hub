@@ -1,0 +1,35 @@
+# ---------------------------------------------------------------- secrets
+# The hub generates an admin API key, per-tenant dashboard passwords and
+# OpenRouter keys. None of it is ever committable.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ------------------------------------------------------- generated tenants
+# Local tenant data when TENANT_ROOT is pointed inside the repo instead of
+# at /srv/hermes-multi (see docker-compose.yml).
+var/
+srv/
+
+# ---------------------------------------------------------------- python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ------------------------------------------------------------------- data
+*.db
+*.sqlite3
+*.log
+
+# -------------------------------------------------------------------- ide
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

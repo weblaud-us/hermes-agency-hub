@@ -1,0 +1,31 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.1
+# Pydantic's EmailStr is a thin wrapper over this; without it, importing
+# clients/schemas.py raises ImportError at startup.
+email-validator==2.2.0
+SQLAlchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+greenlet==3.1.1
+alembic==1.14.0
+docker==7.1.0
+Jinja2==3.1.5
+httpx==0.28.1
+stripe==11.4.1
+python-slugify==8.0.4
+
+# ---- tests ----
+pytest==8.3.4
+pytest-asyncio==0.25.2
+# The suite runs against SQLite by default so it needs no services at all.
+aiosqlite==0.20.0
+# Asserts the generated config.yaml is parseable, not merely well-shaped.
+PyYAML==6.0.2
+pytest-cov==6.0.0
+
+# ---- optional: `HERMES_TEST_POSTGRES=1` runs the suite on real Postgres ----
+# Needs a Docker daemon. asyncpg is already a runtime dependency above.
+#   pip install "testcontainers[postgres]"
+# `HERMES_TEST_DOCKER=1` additionally enables the live-container tests; those
+# use the docker SDK directly and need nothing extra installed.

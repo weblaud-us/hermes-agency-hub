@@ -1,0 +1,22 @@
+# Keep the build context small and the image clean. The venv in particular is
+# platform-specific and would both bloat the context and risk shadowing the
+# image's own site-packages.
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Tests are not needed at runtime.
+tests/
+pytest.ini
+
+# Never bake secrets into an image layer.
+.env
+.env.*
+
+*.db
+*.sqlite3
+*.log
