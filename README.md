@@ -123,6 +123,13 @@ proxying there hits nginx's. So both reach tenants over the shared
 `nginx_upstream_mode` = `network`). The loopback ports are still published —
 for host-side `curl` debugging, and for the host-nginx deployment.
 
+**nginx looks up each tenant per request, not at startup.** nginx refuses its
+whole config if a name in an `upstream` block does not resolve when it loads, so
+one stopped tenant would block every later reload and stop nginx from restarting.
+Under `network` mode the tenant sites therefore use Docker's DNS (`127.0.0.11`)
+and `proxy_pass` through a variable. A stopped tenant's visitors get a 502 and
+everyone else is unaffected. The trade-off is no upstream keepalive.
+
 ### Secret handling
 
 The agent loads `/opt/data/.env` with `override=True`, so that file wins over

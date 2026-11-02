@@ -20,7 +20,10 @@ Opt in to the live-daemon tests with ``HERMES_TEST_DOCKER=1``.
 from __future__ import annotations
 
 import asyncio
+import re
+import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from docker.errors import APIError, DockerException, ImageNotFound
@@ -30,6 +33,7 @@ from conftest import (
     EXPECTED_CAP_ADD,
     FORBIDDEN_CAPS,
     LIVE_IMAGE,
+    FakeClient,
     FakeDockerClient,
     assert_hardened,
     assert_no_secrets,
@@ -197,6 +201,13 @@ class TestDockerSdkCalls:
         # A tenant that can write the agency library can rewrite every other
         # tenant's skills on the next sync.
         assert any(bind.endswith(":ro") for bind in binds)
+
+
+def _directives(conf: str) -> str:
+    """A config with its comments removed, which discuss the directives too."""
+    return "\n".join(
+        line for line in conf.splitlines() if not line.lstrip().startswith("#")
+    )
 
 
 async def _created(service: DockerService, fake: FakeDockerClient) -> dict:
@@ -1106,8 +1117,34 @@ class TestProxyRegistration:
         assert f"server_name {client.subdomain};" in conf
         assert "location /v1/" in conf
         assert "proxy_set_header Upgrade    $http_upgrade;" in conf
-        assert f"server {client.container_name}:9119;" in conf
-        assert f"server {client.container_name}:8642;" in conf
+        assert re.search(rf"set \$hermes_dash\s+{client.container_name}:9119;", conf)
+        assert re.search(rf"set \$hermes_api\s+{client.container_name}:8642;", conf)
+
+    async def test_network_mode_resolves_tenants_per_request(self, nginx_settings, client):
+        # An `upstream` block here is resolved at config load, which lets one
+        # stopped tenant fail `nginx -t` for every tenant.
+        from src.orchestrator.templates import TemplateRenderer
+
+        conf = TemplateRenderer(nginx_settings).render_nginx(client)
+        assert "upstream " not in _directives(conf)
+        assert "resolver 127.0.0.11" in conf
+        assert "proxy_pass http://$hermes_dash;" in conf
+        assert "proxy_pass http://$hermes_api;" in conf
+
+    async def test_loopback_mode_keeps_static_upstreams(self, settings_factory, client):
+        # A host nginx has no Docker DNS at 127.0.0.11, and its host does not
+        # depend on any tenant container, so the static form is the right one.
+        from src.orchestrator.templates import TemplateRenderer
+
+        settings = settings_factory(nginx_upstream_mode="loopback")
+        conf = TemplateRenderer(settings).render_nginx(client)
+        assert "resolver" not in _directives(conf)
+        assert "$hermes_" not in conf
+        assert f"server host.docker.internal:{client.container_port_dash};" in conf
+        assert f"server host.docker.internal:{client.container_port_api};" in conf
+        assert "proxy_pass http://hermes_dash_acme;" in conf
+        assert "proxy_pass http://hermes_api_acme;" in conf
+        assert "keepalive 16;" in conf
 
     async def test_a_rejected_config_is_rolled_back(
         self, nginx_settings, session, make_db_client, probe, skills_library
@@ -1523,12 +1560,10 @@ class TestLiveNginxConfig:
         finally:
             container.remove(force=True)
 
-    @pytest.fixture
-    def conf_dir(self, settings_factory, tmp_path, client):
+    def _render(self, settings, client, directory):
         from src.orchestrator.templates import TemplateRenderer
 
-        renderer = TemplateRenderer(settings_factory())
-        directory = tmp_path / "conf.d"
+        renderer = TemplateRenderer(settings)
         directory.mkdir()
         (directory / "00-hermes-shared.conf").write_text(
             renderer.render_nginx_shared(), encoding="utf-8"
@@ -1538,33 +1573,175 @@ class TestLiveNginxConfig:
         )
         return directory
 
-    def test_nginx_accepts_the_rendered_configuration(
-        self, live_docker_client, conf_dir, client
+    def test_a_config_naming_an_absent_tenant_is_accepted(
+        self, live_docker_client, settings_factory, tmp_path, client
     ):
-        # The upstream name has to resolve for nginx to load the config, as it
-        # does on the shared network when the tenant is running.
-        exit_code, output = self._test_config(
-            live_docker_client,
-            conf_dir,
-            extra_hosts={client.container_name: "127.0.0.1"},
-        )
+        # The tenant's container does not exist, the same lookup failure as one
+        # that stopped. This used to fail with "host not found in upstream".
+        conf_dir = self._render(settings_factory(), client, tmp_path / "conf.d")
+        exit_code, output = self._test_config(live_docker_client, conf_dir)
         assert exit_code == 0, output
         assert "syntax is ok" in output
         assert "test is successful" in output
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "DEFECT: the upstream blocks name the tenant's container, and nginx "
-            "resolves those names when it loads its config. One stopped tenant "
-            "makes `nginx -t` fail for the whole conf.d: every later onboarding "
-            "is rejected and rolled back, and nginx itself cannot restart. Fix "
-            "needs a template change, e.g. `resolver 127.0.0.11` with "
-            "proxy_pass through a variable so names resolve per request."
-        ),
-    )
-    def test_one_stopped_tenant_does_not_break_the_shared_config(
-        self, live_docker_client, conf_dir
+    def test_the_loopback_config_is_accepted(
+        self, live_docker_client, settings_factory, tmp_path, client
     ):
-        exit_code, output = self._test_config(live_docker_client, conf_dir)
+        settings = settings_factory(nginx_upstream_mode="loopback")
+        conf_dir = self._render(settings, client, tmp_path / "conf.d")
+        exit_code, output = self._test_config(
+            live_docker_client,
+            conf_dir,
+            extra_hosts={settings.loopback_host_alias: "127.0.0.1"},
+        )
         assert exit_code == 0, output
+
+
+@pytest.mark.docker
+class TestLiveTenantIsolation:
+    """Real traffic through real nginx to real tenant containers.
+
+    Each tenant is a stand-in container, on a real Docker network, answering on
+    the two internal ports with its name, its service and the path it received.
+    Stopping one must only ever affect that one.
+    """
+
+    IMAGE = "nginx:alpine"
+    NETWORK = "hermes-test-isolation"
+
+    @pytest.fixture
+    def stack(self, live_docker_client, settings_factory, tmp_path):
+        from src.orchestrator.templates import TemplateRenderer
+
+        renderer = TemplateRenderer(settings_factory())
+        conf_dir = tmp_path / "conf.d"
+        conf_dir.mkdir()
+        (conf_dir / "00-hermes-shared.conf").write_text(
+            renderer.render_nginx_shared(), encoding="utf-8"
+        )
+        network = live_docker_client.networks.create(self.NETWORK, driver="bridge")
+        started = []
+
+        def run(name, volume_dir):
+            container = live_docker_client.containers.run(
+                self.IMAGE,
+                name=name,
+                network=self.NETWORK,
+                volumes={str(volume_dir): {"bind": "/etc/nginx/conf.d", "mode": "ro"}},
+                detach=True,
+            )
+            started.append(container)
+            return container
+
+        def add_site(slug):
+            client = FakeClient(
+                slug=slug,
+                subdomain=f"{slug}.localhost",
+                container_name=f"hermes-test-tenant-{slug}",
+            )
+            (conf_dir / f"{client.subdomain}.conf").write_text(
+                renderer.render_nginx(client), encoding="utf-8"
+            )
+
+        def add_tenant(slug):
+            add_site(slug)
+            backend_dir = tmp_path / f"backend-{slug}"
+            backend_dir.mkdir()
+            (backend_dir / "default.conf").write_text(
+                f'server {{ listen 9119; default_type text/plain; location / '
+                f'{{ return 200 "{slug}-dash $request_uri\\n"; }} }}\n'
+                f'server {{ listen 8642; default_type text/plain; location / '
+                f'{{ return 200 "{slug}-api $request_uri\\n"; }} }}\n',
+                encoding="utf-8",
+            )
+            return run(f"hermes-test-tenant-{slug}", backend_dir)
+
+        try:
+            tenants = {slug: add_tenant(slug) for slug in ("acme", "globex")}
+            proxy = run("hermes-test-isolation-proxy", conf_dir)
+            yield SimpleNamespace(
+                proxy=proxy, tenants=tenants, add_site=add_site, add_tenant=add_tenant
+            )
+        finally:
+            for container in started:
+                container.remove(force=True)
+            network.remove()
+
+    @staticmethod
+    def _get(proxy, host, path="/"):
+        """``(exit_code, output)`` for a request sent from inside the proxy."""
+        exit_code, output = proxy.exec_run(
+            ["wget", "-O-", "-T", "5", "--header", f"Host: {host}",
+             f"http://127.0.0.1{path}"]
+        )
+        return exit_code, output.decode("utf-8", errors="replace")
+
+    def _eventually(self, proxy, host, expected, path="/", timeout=30):
+        """Poll until a response contains ``expected``; return the last output."""
+        deadline = time.monotonic() + timeout
+        while True:
+            _, output = self._get(proxy, host, path)
+            if expected in output or time.monotonic() > deadline:
+                return output
+            time.sleep(0.5)
+
+    @staticmethod
+    def _reload_ok(proxy):
+        for command in (["nginx", "-t"], ["nginx", "-s", "reload"]):
+            exit_code, output = proxy.exec_run(command)
+            assert exit_code == 0, output.decode("utf-8", errors="replace")
+
+    def test_each_tenant_gets_its_own_services(self, stack):
+        proxy = stack.proxy
+        output = self._eventually(proxy, "acme.localhost", "acme-dash /app", path="/app")
+        assert "acme-dash /app" in output, output
+        # The full path has to survive the variable form of proxy_pass.
+        assert "acme-api /v1/models?a=1" in self._get(
+            proxy, "acme.localhost", "/v1/models?a=1"
+        )[1]
+        assert "globex-dash /" in self._get(proxy, "globex.localhost")[1]
+        assert "globex-api /v1/x" in self._get(proxy, "globex.localhost", "/v1/x")[1]
+        # An unknown Host hits the catch-all, not whichever tenant loaded first.
+        exit_code, output = self._get(proxy, "nobody.localhost")
+        assert exit_code != 0 and "404" in output, output
+
+    def test_a_stopped_tenant_affects_only_itself(self, stack):
+        proxy = stack.proxy
+        self._eventually(proxy, "acme.localhost", "acme-dash")
+        stack.tenants["acme"].stop(timeout=1)
+
+        # The neighbour is unaffected straight away...
+        assert "globex-dash /" in self._get(proxy, "globex.localhost")[1]
+        # ...the stopped tenant gets an error rather than someone else's data...
+        output = self._eventually(proxy, "acme.localhost", "502")
+        assert "502" in output and "acme-dash" not in output, output
+        # ...and the config stays loadable, which is what used to break.
+        self._reload_ok(proxy)
+        assert "globex-api /v1/x" in self._get(proxy, "globex.localhost", "/v1/x")[1]
+
+    def test_a_new_tenant_can_onboard_while_another_is_stopped(self, stack):
+        proxy = stack.proxy
+        self._eventually(proxy, "acme.localhost", "acme-dash")
+        stack.tenants["acme"].stop(timeout=1)
+
+        # The order the hub uses: the container exists, then the site is added.
+        stack.add_tenant("zeta")
+        self._reload_ok(proxy)
+        output = self._eventually(proxy, "zeta.localhost", "zeta-dash")
+        assert "zeta-dash /" in output, output
+
+    def test_nginx_restarts_with_a_tenant_down_and_the_tenant_can_return(self, stack):
+        proxy = stack.proxy
+        self._eventually(proxy, "acme.localhost", "acme-dash")
+        stack.tenants["acme"].stop(timeout=1)
+
+        proxy.restart(timeout=2)
+        output = self._eventually(proxy, "globex.localhost", "globex-dash")
+        assert "globex-dash /" in output, output
+        proxy.reload()
+        assert proxy.status == "running"
+
+        # No reload needed: the name is looked up again once `valid` expires.
+        stack.tenants["acme"].start()
+        output = self._eventually(proxy, "acme.localhost", "acme-dash")
+        assert "acme-dash /" in output, output

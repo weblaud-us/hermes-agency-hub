@@ -43,7 +43,8 @@ Both are off by default because they need a daemon and take real time.
 ```powershell
 # Create and inspect a real container; verifies the daemon actually APPLIES the
 # resource caps and security flags, not just that we asked for them. Also runs a
-# real `nginx -t` over the rendered config.
+# real `nginx -t` over the rendered config, and real traffic through nginx to
+# stand-in tenants, stopping one to prove the others keep serving.
 # Pulls alpine:3.20 and nginx:alpine once if absent.
 $env:HERMES_TEST_DOCKER = "1"; pytest -m docker
 
@@ -80,11 +81,7 @@ contract instead of two that can drift apart.
 A confirmed bug that is not fixed yet is pinned with `xfail(strict=True)` and a
 `reason` giving the diagnosis. Because it is *strict*, fixing the bug turns the
 xfail into a **failure**, which is the prompt to delete the marker. Run
-`pytest -rx` to list them.
-
-| Test | Defect |
-|---|---|
-| `TestLiveNginxConfig::test_one_stopped_tenant_does_not_break_the_shared_config` (needs `HERMES_TEST_DOCKER=1`) | nginx resolves upstream names when it loads its config, so one stopped tenant fails `nginx -t` for all of `conf.d`. |
+`pytest -rx` to list them. There are none at the moment.
 
 ## Conventions
 

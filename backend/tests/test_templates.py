@@ -149,8 +149,8 @@ class TestNginxTemplate:
         # Default mode: nginx is a container and must use Docker DNS, not the
         # host loopback ports.
         conf = renderer.render_nginx(client)
-        assert f"server {client.container_name}:9119;" in conf
-        assert f"server {client.container_name}:8642;" in conf
+        assert re.search(rf"set \$hermes_dash\s+{client.container_name}:9119;", conf)
+        assert re.search(rf"set \$hermes_api\s+{client.container_name}:8642;", conf)
 
     def test_loopback_mode_targets_published_ports(self, settings, client):
         settings.nginx_upstream_mode = "loopback"
