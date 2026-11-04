@@ -9,10 +9,31 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
-from src.config.settings import Settings
+from src.config.settings import REPO_ROOT, Settings
 from src.proxy.service import NoPortAvailableError, allocate_port_pair
+
+
+class TestComposeFile:
+    def test_the_hub_can_see_the_skill_library(self):
+        # The library is outside the image's build context, so without this
+        # mount every tenant silently gets no skills.
+        compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+        hub = compose["services"]["hub"]
+        target = hub["environment"]["SHARED_SKILLS_DIR"]
+        assert f"./shared-skills:{target}:ro" in hub["volumes"]
+        assert (REPO_ROOT / "shared-skills").is_dir()
+
+    def test_the_website_can_reach_the_hub_from_its_container(self):
+        # Inside the container localhost is the website itself, and a portal that
+        # cannot reach the hub only shows up as "unavailable" in the browser.
+        compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+        web = compose["services"]["web"]
+        hub = compose["services"]["hub"]
+        assert web["environment"]["PORTAL_HUB_URL"] == "http://hub:8080"
+        assert set(web["networks"]) & set(hub["networks"])
 
 
 class TestDerivedPaths:
@@ -145,3 +166,68 @@ class TestResourceEnvelope:
     def test_plan_overrides_fall_back_to_the_hard_caps(self, settings):
         assert settings.cpus_for("starter") == settings.client_cpus
         assert settings.memory_for("starter") == settings.client_memory
+
+
+LIST_SETTINGS = [
+    "CORS_ORIGINS",
+    "CLIENT_CAP_DROP",
+    "CLIENT_CAP_ADD",
+    "CLIENT_SECURITY_OPT",
+    "NGINX_TEST_COMMAND",
+    "NGINX_RELOAD_COMMAND",
+]
+
+
+class TestListSettingsFromTheEnvironment:
+    """These must go through the environment, not constructor arguments.
+
+    The environment source decodes values before any validator runs, so a
+    constructor-based test passes while a real deployment fails at startup.
+    """
+
+    def test_a_bare_origin_is_accepted(self, monkeypatch):
+        monkeypatch.setenv("CORS_ORIGINS", "https://console.example.com")
+        assert Settings(_env_file=None).cors_origins == ["https://console.example.com"]
+
+    @pytest.mark.parametrize("name", LIST_SETTINGS)
+    def test_comma_separated_values_are_split_and_trimmed(self, monkeypatch, name):
+        monkeypatch.setenv(name, "one, two")
+        assert getattr(Settings(_env_file=None), name.lower()) == ["one", "two"]
+
+    @pytest.mark.parametrize("name", LIST_SETTINGS)
+    def test_a_json_array_is_still_accepted(self, monkeypatch, name):
+        # .env.example documents this form for the nginx commands.
+        monkeypatch.setenv(name, '["one", "two"]')
+        assert getattr(Settings(_env_file=None), name.lower()) == ["one", "two"]
+
+    def test_a_dotenv_file_takes_the_same_path(self, tmp_path: Path):
+        env_file = tmp_path / ".env"
+        env_file.write_text("CORS_ORIGINS=https://a.example.com,https://b.example.com\n")
+        assert Settings(_env_file=env_file).cors_origins == [
+            "https://a.example.com",
+            "https://b.example.com",
+        ]
+
+    @pytest.mark.parametrize("name", LIST_SETTINGS)
+    @pytest.mark.parametrize("blank", ["", "   ", " , "])
+    def test_a_blank_value_is_rejected(self, monkeypatch, name, blank):
+        # Reading a blank CLIENT_CAP_DROP as an empty list would start tenants
+        # with Docker's default capabilities instead of failing at startup.
+        monkeypatch.setenv(name, blank)
+        with pytest.raises(ValidationError, match="blank"):
+            Settings(_env_file=None)
+
+    def test_an_explicit_empty_array_is_allowed(self, monkeypatch):
+        # Unlike a blank value, this can only be deliberate.
+        monkeypatch.setenv("CORS_ORIGINS", "[]")
+        assert Settings(_env_file=None).cors_origins == []
+
+    def test_malformed_json_is_rejected(self, monkeypatch):
+        monkeypatch.setenv("CORS_ORIGINS", '["https://a.example.com"')
+        with pytest.raises(ValidationError):
+            Settings(_env_file=None)
+
+    def test_unset_values_keep_the_hardened_defaults(self):
+        s = Settings(_env_file=None)
+        assert s.client_cap_drop == ["ALL"]
+        assert s.client_security_opt == ["no-new-privileges:true"]

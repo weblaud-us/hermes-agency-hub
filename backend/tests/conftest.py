@@ -27,6 +27,8 @@ unless a test is explicitly opted in:
   and inspect a real (tiny) container.
 * ``HERMES_TEST_POSTGRES=1`` swaps SQLite for a throwaway Postgres started with
   Testcontainers, so the schema is exercised on the engine production uses.
+* ``HERMES_TEST_AGENT=1`` enables ``test_real_agent.py``, which onboards a tenant
+  on the real agent image through the running stack.
 """
 
 from __future__ import annotations

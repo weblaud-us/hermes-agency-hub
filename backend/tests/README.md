@@ -6,6 +6,7 @@ tests/
   test_unit.py         generated artefacts, file modes, naming, port allocation
   test_orchestrator.py container lifecycle: SDK calls, provisioning, teardown
   test_e2e_api.py      the HTTP surface, end to end
+  test_real_agent.py   opt-in: a new tenant on the real agent image
 ```
 
 The default run needs **no services at all** — no Docker daemon, no Postgres, no
@@ -38,7 +39,7 @@ pytest
 
 ## Opt-in layers
 
-Both are off by default because they need a daemon and take real time.
+These are off by default because they need a daemon and take real time.
 
 ```powershell
 # Create and inspect a real container; verifies the daemon actually APPLIES the
@@ -52,15 +53,23 @@ $env:HERMES_TEST_DOCKER = "1"; pytest -m docker
 # schema is exercised on the engine production uses.
 pip install "testcontainers[postgres]"
 $env:HERMES_TEST_POSTGRES = "1"; pytest
+
+# Onboard a tenant on the real agent image through the running stack, and check
+# it comes up and stays up. The only layer that can see the agent itself fail.
+# Needs `docker compose up` done and the agent image pulled.
+$env:HERMES_TEST_AGENT = "1"; $env:HERMES_TEST_ADMIN_KEY = "<ADMIN_API_KEY>"; pytest -m agent
 ```
 
 ```bash
 HERMES_TEST_DOCKER=1 pytest -m docker
 HERMES_TEST_POSTGRES=1 pytest
+HERMES_TEST_AGENT=1 HERMES_TEST_ADMIN_KEY=<ADMIN_API_KEY> pytest -m agent
 ```
 
 Overrides: `HERMES_TEST_IMAGE` (default `alpine:3.20`),
-`HERMES_TEST_POSTGRES_IMAGE` (default `postgres:16-alpine`).
+`HERMES_TEST_POSTGRES_IMAGE` (default `postgres:16-alpine`),
+`HERMES_TEST_HUB_URL` (default `http://localhost:8080`),
+`HERMES_TEST_NGINX_URL` (default `http://localhost`).
 
 ## What is mocked, and what is not
 

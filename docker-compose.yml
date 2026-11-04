@@ -4,12 +4,9 @@
 # Copy .env.example to .env and fill it in before the first `up`.
 #
 #   docker compose up -d --build
-#   docker compose exec hub alembic upgrade head
 #
-# Pre-pull the agent image once before onboarding anyone — it is several GB,
-# and pulling it lazily inside the first request makes that request look hung:
-#
-#   docker pull nousresearch/hermes-agent:latest
+# That one command pulls the agent image, starts everything and migrates the
+# database. The first run takes a while: the agent image is several GB.
 #
 # ---------------------------------------------------------------------------
 # Why the data root is bind-mounted at the SAME absolute path on both sides
@@ -76,6 +73,17 @@ services:
       && chmod 755 /data
       && echo '[hub-init] data root ready'"
 
+  # ------------------------------------------------------- agent image pull
+  # Only here to get the image onto the host during `up`. Pulling it lazily
+  # inside the first onboarding request makes that request look hung. Exits
+  # straight away; tenants are created by the hub, not by this service.
+  agent-image:
+    image: ${CLIENT_IMAGE:-nousresearch/hermes-agent:latest}
+    container_name: hermes-agent-image
+    pull_policy: missing
+    entrypoint: ["true"]
+    network_mode: none
+
   # ------------------------------------------------------------------- hub
   hub:
     build:
@@ -88,6 +96,8 @@ services:
         condition: service_healthy
       hub-init:
         condition: service_completed_successfully
+      agent-image:
+        condition: service_completed_successfully
     environment:
       ENVIRONMENT: ${ENVIRONMENT:-local}
       DEBUG: ${DEBUG:-true}
@@ -96,9 +106,17 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-hermes}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-hermes_hub}
       BASE_DOMAIN: ${BASE_DOMAIN:-localhost}
       HUB_PUBLIC_URL: ${HUB_PUBLIC_URL:-http://localhost:8080}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       CLIENT_IMAGE: ${CLIENT_IMAGE:-nousresearch/hermes-agent:latest}
       CLIENT_IMAGE_PULL_POLICY: ${CLIENT_IMAGE_PULL_POLICY:-missing}
       DATA_ROOT: ${DATA_ROOT:-/srv/hermes-multi}
+      # Tenants run as this uid, and the client portal reads and edits their
+      # files. The agent keeps those files at 0600 under a 0700 directory, so the
+      # hub's own uid (10001) must match or every portal read is denied.
+      CLIENT_UID: ${CLIENT_UID:-10001}
+      CLIENT_GID: ${CLIENT_GID:-10001}
+      PORTAL_PUBLIC_URL: ${PORTAL_PUBLIC_URL:-http://localhost:3000}
+      SHARED_SKILLS_DIR: /shared-skills
       # Containerized nginx: reach tenants over the shared Docker network and
       # drive nginx through `docker exec`. See .env.example for the host-nginx
       # override set.
@@ -111,6 +129,9 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # Same path both sides — see the header note.
       - ${DATA_ROOT:-/srv/hermes-multi}:${DATA_ROOT:-/srv/hermes-multi}
+      # The agency's skill library. It sits outside the image's build context,
+      # and the hub republishes it under the data root each time it starts.
+      - ./shared-skills:/shared-skills:ro
     # The image runs as uid 10001; the socket is group-owned. On Docker
     # Desktop the socket is root:root, so group 0 is correct. On a Linux VPS
     # set DOCKER_GID to: stat -c '%g' /var/run/docker.sock
@@ -140,3 +161,29 @@ services:
     networks: [hermes-clients]
     ports:
       - "${NGINX_HTTP_PORT:-80}:80"
+
+  # --------------------------------------------------------------- website
+  web:
+    build:
+      context: ./frontend
+      # Compiled into the browser bundle, so changing one means rebuilding. The
+      # browser runs on the user's machine, so this must be the hub's public
+      # address, not its service name.
+      args:
+        NEXT_PUBLIC_API_URL: ${HUB_PUBLIC_URL:-http://localhost:8080}
+        NEXT_PUBLIC_BASE_DOMAIN: ${BASE_DOMAIN:-localhost}
+        NEXT_PUBLIC_TENANT_SLOTS: ${NEXT_PUBLIC_TENANT_SLOTS:-20}
+    image: hermes-agency-web:local
+    container_name: hermes-web
+    restart: unless-stopped
+    depends_on:
+      hub:
+        condition: service_healthy
+    environment:
+      # The website's own server calls the hub for the client portal. Inside
+      # this container, localhost is the website itself.
+      PORTAL_HUB_URL: http://hub:8080
+    # Not on hermes-clients: tenants have no reason to reach the website.
+    networks: [hermes-internal]
+    ports:
+      - "${WEB_BIND:-127.0.0.1}:3000:3000"

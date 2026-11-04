@@ -197,7 +197,6 @@ class TestProvisionSuccess:
         assert call["memory"] == "2g"
         # The image's s6 init must stay PID 1.
         assert "entrypoint" not in call
-        assert "command" not in call
 
     async def test_volumes_use_daemon_visible_paths(
         self, session, settings, docker, skills_library

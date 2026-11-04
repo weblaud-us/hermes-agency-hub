@@ -178,12 +178,20 @@ class TestDockerSdkCalls:
     ):
         # The image's ENTRYPOINT is s6-overlay's /init, which must stay PID 1:
         # it runs the UID remap, volume chown, config seeding and supervision
-        # tree before any service starts. Overriding either skips all of that.
+        # tree before any service starts. Overriding it skips all of that.
         call = await _created(docker_service, fake_docker)
         assert "entrypoint" not in call
-        assert "command" not in call
         assert call["detach"] is True
         assert call["hostname"] == CONTAINER
+
+    async def test_the_main_program_keeps_the_supervisor_running(
+        self, docker_service, fake_docker
+    ):
+        # /init shuts every service down when its main program exits, and with
+        # no command that program is the interactive CLI, which exits at once
+        # without a terminal.
+        call = await _created(docker_service, fake_docker)
+        assert call["command"] == ["sleep", "infinity"]
 
     async def test_the_restart_policy_survives_a_host_reboot(
         self, docker_service, fake_docker
@@ -1648,8 +1656,10 @@ class TestLiveTenantIsolation:
             backend_dir = tmp_path / f"backend-{slug}"
             backend_dir.mkdir()
             (backend_dir / "default.conf").write_text(
-                f'server {{ listen 9119; default_type text/plain; location / '
-                f'{{ return 200 "{slug}-dash $request_uri\\n"; }} }}\n'
+                f'server {{ listen 9119; default_type text/plain; '
+                f'location ~ ^/(login|other)$ {{ default_type text/html; '
+                f'return 200 "<body>{slug}</body>"; }} '
+                f'location / {{ return 200 "{slug}-dash $request_uri\\n"; }} }}\n'
                 f'server {{ listen 8642; default_type text/plain; location / '
                 f'{{ return 200 "{slug}-api $request_uri\\n"; }} }}\n',
                 encoding="utf-8",
@@ -1704,6 +1714,17 @@ class TestLiveTenantIsolation:
         # An unknown Host hits the catch-all, not whichever tenant loaded first.
         exit_code, output = self._get(proxy, "nobody.localhost")
         assert exit_code != 0 and "404" in output, output
+
+    def test_only_the_login_page_gets_the_password_toggle(self, stack):
+        proxy = stack.proxy
+        # The tenant site is unchanged: the toggle comes from the shared config.
+        for path in ("/login", "/login?next=%2F"):
+            output = self._eventually(proxy, "acme.localhost", "hermes-reveal", path=path)
+            assert "hermes-reveal" in output, output
+            assert output.count("</body>") == 1, output
+
+        assert "hermes-reveal" not in self._get(proxy, "acme.localhost", "/other")[1]
+        assert "hermes-reveal" not in self._get(proxy, "acme.localhost", "/v1/login")[1]
 
     def test_a_stopped_tenant_affects_only_itself(self, stack):
         proxy = stack.proxy

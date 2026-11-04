@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Iterator
 from functools import lru_cache
 from typing import Any
 
@@ -50,6 +51,12 @@ _PORT_COLLISION_MARKERS = (
 #: DockerException on first contact; once the client is cached, a daemon that
 #: went away raises a requests error instead, which is not a DockerException.
 _DAEMON_ERRORS = (DockerException, RequestException)
+
+#: What /init runs as the container's main program. When that program exits, s6
+#: shuts every service down. With no command it is the interactive `hermes` CLI,
+#: which exits at once without a terminal, so a tenant needs a program that only
+#: waits. The gateway and dashboard run as supervised services alongside it.
+TENANT_MAIN_COMMAND = ["sleep", "infinity"]
 
 
 class OrchestratorError(RuntimeError):
@@ -219,11 +226,12 @@ class DockerService:
             restart_policy={"Name": settings.client_restart_policy},
             network=primary,
             hostname=name,
-            # NOTE: no `entrypoint` or `command`. The image's ENTRYPOINT is
-            # s6-overlay's /init, which must stay PID 1 — it runs the UID
-            # remap, volume chown, config seeding and supervision tree before
-            # any service starts. Overriding either skips all of that and the
-            # gateway will not work.
+            # NOTE: no `entrypoint`. The image's ENTRYPOINT is s6-overlay's
+            # /init, which must stay PID 1 — it runs the UID remap, volume
+            # chown, config seeding and supervision tree before any service
+            # starts. Overriding it skips all of that and the gateway will not
+            # work.
+            command=TENANT_MAIN_COMMAND,
         )
         for network_name in extra:
             self.client.networks.get(network_name).connect(container)
@@ -335,13 +343,14 @@ class DockerService:
         container = await self.get(name_or_id)
         if container is None:
             return {"container_id": None, "state": "absent", "health": None,
-                    "started_at": None, "restart_count": 0}
+                    "started_at": None, "finished_at": None, "restart_count": 0}
         state = container.attrs.get("State", {})
         return {
             "container_id": container.id,
             "state": state.get("Status", "unknown"),
             "health": (state.get("Health") or {}).get("Status"),
             "started_at": state.get("StartedAt"),
+            "finished_at": state.get("FinishedAt"),
             "restart_count": container.attrs.get("RestartCount", 0),
         }
 
@@ -407,6 +416,45 @@ class DockerService:
             raise OrchestratorError(f"Container {name_or_id} not found")
         exit_code, output = await asyncio.to_thread(container.exec_run, command)
         return exit_code, output.decode("utf-8", errors="replace")
+
+    def exec_lines_sync(
+        self,
+        name_or_id: str,
+        command: list[str],
+        *,
+        user: str,
+        environment: dict[str, str] | None = None,
+    ) -> Iterator[str]:
+        """Run a long-lived command and yield its output line by line. Blocking.
+
+        For a dedicated worker thread: the iterator waits on the process for as
+        long as the process runs.
+        """
+        container = self._get_sync(name_or_id)
+        if container is None:
+            raise OrchestratorError(f"Container {name_or_id} not found")
+        try:
+            result = container.exec_run(
+                command, stream=True, user=user, environment=environment
+            )
+        except (APIError, *_DAEMON_ERRORS) as exc:
+            raise OrchestratorError(f"Could not exec in {name_or_id}: {exc}") from exc
+
+        buffer = ""
+        for chunk in result.output:
+            buffer += chunk.decode("utf-8", errors="replace")
+            *lines, buffer = buffer.split("\n")
+            yield from lines
+        if buffer:
+            yield buffer
+
+    def restart_sync(self, name_or_id: str, timeout: int = 30) -> bool:
+        """:meth:`restart` for a caller already on a worker thread."""
+        container = self._get_sync(name_or_id)
+        if container is None:
+            return False
+        container.restart(timeout=timeout)
+        return True
 
     # ------------------------------------------------------------- health
     async def probe(self, url: str, timeout: float = 5.0) -> dict[str, Any]:

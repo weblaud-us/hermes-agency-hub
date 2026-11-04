@@ -22,6 +22,9 @@ from .config.logging import configure_logging
 from .config.settings import get_settings
 from .orchestrator.docker_service import OrchestratorError
 from .orchestrator.provisioner import get_provisioner
+from .portal.errors import PortalError
+from .portal.portal_router import admin_router as portal_admin_router
+from .portal.portal_router import router as portal_router
 from .proxy.service import NoPortAvailableError, ProxyError
 
 logger = logging.getLogger(__name__)
@@ -82,6 +85,8 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(clients_router, prefix=settings.api_prefix)
+    app.include_router(portal_router, prefix=settings.api_prefix)
+    app.include_router(portal_admin_router, prefix=settings.api_prefix)
 
     # ---- domain errors -> status codes --------------------------------
     # Mapped centrally so routes can let these propagate instead of each
@@ -114,6 +119,12 @@ def create_app() -> FastAPI:
     async def _docker_error(request: Request, exc: OrchestratorError) -> JSONResponse:
         # The hub is fine; its dependency is not. 502 says "upstream failed".
         return _problem(status.HTTP_502_BAD_GATEWAY, "orchestrator_error", str(exc))
+
+    @app.exception_handler(PortalError)
+    async def _portal_error(request: Request, exc: PortalError) -> JSONResponse:
+        # Written for a business owner, so unlike the handlers above it is safe
+        # to return to someone outside the agency.
+        return _problem(exc.status_code, exc.slug, exc.detail)
 
     # ---- liveness -----------------------------------------------------
     @app.get("/healthz", tags=["meta"], summary="Hub liveness")

@@ -127,7 +127,7 @@ class Provisioner:
     async def _publish_shared_skills(self) -> None:
         """Copy the agency skill library to a daemon-visible location.
 
-        The canonical library is baked into the hub image, at a path only this
+        The canonical library is mounted into the hub, at a path only this
         process can see. A bind mount source has to be resolvable by the Docker
         daemon, so the library is republished under ``data_root`` — which *is*
         path-identical on both sides — and that copy is what tenants mount.

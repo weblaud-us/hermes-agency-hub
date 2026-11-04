@@ -65,14 +65,22 @@ def parse_env(text: str) -> dict[str, str]:
 
 
 #: Keys safe to pass via `docker run -e`. Everything else in the rendered .env
-#: is either a secret or redundant with it. HERMES_UID/GID are here because the
-#: image's s6 init reads them from the *process* environment during stage2,
-#: before the .env file is loaded by the application.
+#: is either a secret or redundant with it. The HERMES_* keys below are here
+#: because the image's s6 scripts read them from the *process* environment and
+#: never see the .env file, which only the application loads:
+#:   HERMES_UID/GID                  -> the stage2 UID remap
+#:   HERMES_DASHBOARD*               -> without these the dashboard service exits
+#:                                      and marks itself permanently down
+#:   HERMES_GATEWAY_BOOTSTRAP_STATE  -> brings the gateway up on a fresh volume
 DOCKER_ENV_KEYS = frozenset(
     {
         "HERMES_HOME",
         "HERMES_UID",
         "HERMES_GID",
+        "HERMES_DASHBOARD",
+        "HERMES_DASHBOARD_HOST",
+        "HERMES_DASHBOARD_PORT",
+        "HERMES_GATEWAY_BOOTSTRAP_STATE",
         "AGENCY_CLIENT_SLUG",
         "AGENCY_CLIENT_PLAN",
         "AGENCY_ENVIRONMENT",

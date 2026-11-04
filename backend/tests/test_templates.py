@@ -127,6 +127,21 @@ class TestDockerEnvironment:
         assert docker_env["HERMES_GID"] == "10000"
         assert docker_env["HERMES_HOME"] == "/opt/data"
 
+    def test_keeps_what_the_service_scripts_read(self, renderer, client, credentials):
+        # The image's s6 scripts see only the process environment. Left in the
+        # .env file alone, the dashboard exits for good and a fresh tenant's
+        # gateway stays down.
+        docker_env = docker_environment(
+            renderer.render(
+                "client-env.template",
+                renderer.context_for(client, credentials=credentials),
+            )
+        )
+        assert docker_env["HERMES_DASHBOARD"] == "1"
+        assert docker_env["HERMES_DASHBOARD_HOST"] == "0.0.0.0"
+        assert docker_env["HERMES_DASHBOARD_PORT"] == "9119"
+        assert docker_env["HERMES_GATEWAY_BOOTSTRAP_STATE"] == "running"
+
 
 class TestNginxTemplate:
     def test_has_websocket_upgrade_headers(self, renderer, client):
@@ -164,6 +179,16 @@ class TestNginxTemplate:
         shared = renderer.render_nginx_shared()
         assert "map $http_upgrade $connection_upgrade" in shared
         assert "default_server" in shared
+
+    def test_login_toggle_stays_a_valid_nginx_token(self, renderer):
+        # A value over nginx's token limit, or one that closes its quotes or
+        # names a variable early, fails the config for every tenant.
+        shared = renderer.render_nginx_shared()
+        value = re.search(r"/login '(.*?)';", shared, re.DOTALL).group(1)
+        assert value.startswith("<style>") and value.endswith("</body>")
+        assert len(value.encode()) < 4096
+        assert "$" not in value
+        assert "\\" not in value
 
 
 class TestWriteClientFiles:

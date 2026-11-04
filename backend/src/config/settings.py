@@ -20,12 +20,13 @@ Two distinctions in this module are load-bearing and easy to get wrong:
 
 from __future__ import annotations
 
+import json
 from functools import lru_cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 if TYPE_CHECKING:  # avoid a circular import at runtime
     from ..clients.models import Client
@@ -63,10 +64,26 @@ DEFAULT_PLANS: dict[str, PlanResources] = {
 
 
 def _split_csv(value: Any) -> Any:
-    """Accept both JSON arrays and plain comma-separated env values."""
-    if isinstance(value, str) and not value.strip().startswith("["):
-        return [item.strip() for item in value.split(",") if item.strip()]
-    return value
+    """Accept both JSON arrays and plain comma-separated env values.
+
+    A blank value is an error, not an empty list: reading a blank
+    ``CLIENT_CAP_DROP`` as "drop nothing" would silently weaken every new tenant.
+    An explicit ``[]`` still means empty.
+    """
+    if not isinstance(value, str):
+        return value
+    if value.strip().startswith("["):
+        return json.loads(value)
+    items = [item.strip() for item in value.split(",") if item.strip()]
+    if not items:
+        raise ValueError("must not be blank; use [] for an explicitly empty list")
+    return items
+
+
+#: A list setting read from the environment. ``NoDecode`` hands the raw string
+#: to ``_split_csv``; without it the environment source JSON-decodes first and
+#: rejects the comma-separated form before any validator runs.
+EnvList = Annotated[list[str], NoDecode]
 
 
 class Settings(BaseSettings):
@@ -83,7 +100,7 @@ class Settings(BaseSettings):
     api_prefix: str = "/api/v1"
     admin_api_key: str = "change-me-admin-key"
     hub_public_url: str = "http://localhost:8080"
-    cors_origins: list[str] = ["http://localhost:3000"]
+    cors_origins: EnvList = ["http://localhost:3000"]
 
     # ------------------------------------------------------------- database
     database_url: str = (
@@ -120,9 +137,9 @@ class Settings(BaseSettings):
     tenant_root: Path | None = None
     archive_root: Path | None = None
     #: Where the hub publishes a daemon-visible copy of the shared skill
-    #: library. The canonical copy (``shared_skills_dir``) is baked into the
-    #: hub image, at a path the daemon cannot resolve, so it cannot be used as
-    #: a bind source directly.
+    #: library. The canonical copy (``shared_skills_dir``) is mounted into the
+    #: hub at a path the daemon cannot resolve, so it cannot be used as a bind
+    #: source directly.
     skills_publish_dir: Path | None = None
     #: Read-only mount point for the shared agency skill library.
     shared_skills_mount: str = "/opt/data/skills/agency_core"
@@ -161,15 +178,15 @@ class Settings(BaseSettings):
     #:   DAC_OVERRIDE    -> usermod/groupmod UID remap
     #: A bare `cap_drop: ALL` leaves the supervision tree unable to start any
     #: service. NET_RAW, NET_ADMIN, SYS_ADMIN, SYS_PTRACE et al stay dropped.
-    client_cap_drop: list[str] = ["ALL"]
-    client_cap_add: list[str] = [
+    client_cap_drop: EnvList = ["ALL"]
+    client_cap_add: EnvList = [
         "CHOWN",
         "SETUID",
         "SETGID",
         "FOWNER",
         "DAC_OVERRIDE",
     ]
-    client_security_opt: list[str] = ["no-new-privileges:true"]
+    client_security_opt: EnvList = ["no-new-privileges:true"]
     #: Ownership the image remaps its internal `hermes` user to. Never pass
     #: `--user`; the image rejects an arbitrary UID outright.
     client_uid: int = 10000
@@ -197,8 +214,8 @@ class Settings(BaseSettings):
     #: Set to "" for a Debian host nginx reading sites-enabled/.
     nginx_site_suffix: str = ".conf"
     nginx_container_name: str = "hermes-nginx"
-    nginx_test_command: list[str] = ["nginx", "-t"]
-    nginx_reload_command: list[str] = ["nginx", "-s", "reload"]
+    nginx_test_command: EnvList = ["nginx", "-t"]
+    nginx_reload_command: EnvList = ["nginx", "-s", "reload"]
     #: Traefik is retained but off by default; nginx is the spec'd backend.
     traefik_network: str = "hermes-edge"
     traefik_entrypoint: str = "websecure"
@@ -217,6 +234,19 @@ class Settings(BaseSettings):
     stripe_webhook_secret: str = ""
     #: Stripe price id -> plan name, e.g. {"price_123": "growth"}
     stripe_price_to_plan: dict[str, str] = Field(default_factory=dict)
+
+    # -------------------------------------------------------- client portal
+    #: Where the frontend serves /portal/<slug>, for the access links it issues.
+    portal_public_url: str = "http://localhost:3000"
+    portal_token_ttl_days: int = 90
+    #: How long one autonomous action would take a person, for "time saved".
+    #: An estimate by definition, and labelled as one in the portal.
+    portal_minutes_per_task: float = 2.7
+    #: An agent turn can run tools for a while before it answers.
+    portal_chat_timeout_seconds: float = 120.0
+    #: The agent's WhatsApp pairing process, as paths inside a tenant container.
+    whatsapp_bridge_script: str = "/opt/hermes/scripts/whatsapp-bridge/bridge.js"
+    whatsapp_session_path: str = "/opt/data/platforms/whatsapp/session"
 
     # ------------------------------------------------------------ messaging
     messaging_webhook_secret: str = ""

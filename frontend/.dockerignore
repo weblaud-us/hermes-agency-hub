@@ -1,0 +1,7 @@
+# Built for the host's platform, and rebuilt inside the image anyway.
+node_modules
+.next
+tsconfig.tsbuildinfo
+
+# Local settings must never be baked into an image.
+.env*

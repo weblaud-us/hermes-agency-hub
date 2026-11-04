@@ -1,8 +1,9 @@
 """HTTP surface for client lifecycle management.
 
-Every route on this router requires the agency admin key. Tenant-facing
-traffic never reaches the hub: it goes through nginx straight to the tenant's
-own container, authenticated by that tenant's own credentials.
+Every route on this router requires the agency admin key. A tenant's own
+traffic goes through nginx straight to its container, authenticated by that
+tenant's own credentials. The one tenant-facing surface on the hub is the client
+portal, in ``portal/``, which has its own per-tenant authentication.
 """
 
 from __future__ import annotations
