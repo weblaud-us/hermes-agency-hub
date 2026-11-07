@@ -168,3 +168,63 @@ class KeyedWindow:
 
     def reset(self, key: str) -> None:
         self._hits.pop(key, None)
+
+
+class FailureLimiter:
+    """Brute-force guard that counts only *failed* attempts.
+
+    A correct password never uses up a budget, so a person who signs in properly is not
+    locked out by someone else's guesses against the same address. Each failure is
+    recorded against every key it is given (the address and the caller's IP), and the
+    next attempt is refused while any of them is out of budget.
+    """
+
+    def __init__(self, limit: int, seconds: float) -> None:
+        self.limit = limit
+        self.seconds = seconds
+        self._hits: dict[str, deque[float]] = defaultdict(deque)
+
+    def _live(self, key: str, now: float) -> deque[float]:
+        failures = self._hits[key]
+        while failures and now - failures[0] >= self.seconds:
+            failures.popleft()
+        if not failures:
+            self._hits.pop(key, None)
+        return failures
+
+    def check(self, *keys: str) -> None:
+        now = time.monotonic()
+        for key in keys:
+            if len(self._live(key, now)) >= self.limit:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Too many failed attempts. Try again in 15 minutes.",
+                    headers={"Retry-After": str(int(self.seconds))},
+                )
+
+    def record_failure(self, *keys: str) -> None:
+        now = time.monotonic()
+        for key in keys:
+            self._live(key, now)
+            self._hits[key].append(now)
+
+    def reset(self, *keys: str) -> None:
+        for key in keys:
+            self._hits.pop(key, None)
+
+
+def client_ip(request: Request, settings: Settings) -> str:
+    """The caller's address for rate limiting.
+
+    The portal and the console reach the hub through the website's server, so the socket
+    address is the website's. The website forwards the visitor's address in
+    ``X-Forwarded-For``, and that header is believed only when ``trust_proxy_headers`` says
+    a proxy this hub controls is the one setting it.
+    """
+    if settings.trust_proxy_headers:
+        forwarded = request.headers.get("x-forwarded-for", "")
+        # The last entry is the one our own proxy appended; earlier ones are client-supplied.
+        last = forwarded.split(",")[-1].strip()
+        if last:
+            return last
+    return request.client.host if request.client else "unknown"

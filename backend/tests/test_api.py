@@ -59,7 +59,7 @@ class StubProvisioner:
             credentials=credentials,
             healthy=self.healthy,
             detail="ok" if self.healthy else "probe timed out",
-            synced_skills=["lead-qualification"],
+            synced_skills=["sales-rep-inbox"],
         )
 
     async def teardown_client(self, session, client, *, archive=True):

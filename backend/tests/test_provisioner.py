@@ -128,7 +128,7 @@ async def session(tmp_path: Path):
 @pytest.fixture
 def skills_library(settings):
     """A minimal shared skill library on disk."""
-    for name in ("lead-qualification", "ecommerce-lookup"):
+    for name in ("sales-rep-inbox", "web-seo-manager"):
         directory = settings.shared_skills_dir / name
         directory.mkdir(parents=True, exist_ok=True)
         (directory / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
@@ -257,12 +257,12 @@ class TestProvisionSuccess:
     async def test_only_plan_entitled_skills_are_synced(
         self, session, settings, docker, skills_library
     ):
-        # The starter plan lists lead-qualification only.
+        # The starter plan lists sales-rep-inbox only.
         client = await make_client(session, settings)
         result = await build_provisioner(settings, docker).provision_client(
             session, client, "sk-or-key"
         )
-        assert result.synced_skills == ["lead-qualification"]
+        assert result.synced_skills == ["sales-rep-inbox"]
 
     async def test_openrouter_key_recorded_only_as_a_fragment(
         self, session, settings, docker, skills_library

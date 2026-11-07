@@ -51,7 +51,7 @@ expected date. Give calendar dates. Message the customer when the parcel is book
 for delivery and delivered, without being asked. If tracking has not moved for three
 working days, say so and open an enquiry with the courier.
 
-Use `ecommerce-lookup` when an order needs finding first.
+Use `catalog-keeper-ecommerce` when an order needs finding first.
 
 ## Boundaries
 

@@ -687,7 +687,7 @@ docker logs hermes-hub 2>&1 | Select-String "shared skills"
 docker exec hermes-hub ls /srv/hermes-multi/shared-skills
 ```
 
-**Expected:** `Published shared skills from /shared-skills`, then `ecommerce-lookup` and `lead-qualification`.
+**Expected:** `Published shared skills from /shared-skills`, then the skill folders, including `sales-rep-inbox` and `catalog-keeper-ecommerce`.
 
 **B4. API documentation page**
 
@@ -750,7 +750,7 @@ $Acme | Format-List
 | ------------------------------------------------ | ------------------------------------------------------------- |
 | `status`                                       | `active`                                                    |
 | `warning`                                      | empty                                                         |
-| `synced_skills`                                | `lead-qualification`                                        |
+| `synced_skills`                                | `sales-rep-inbox`                                           |
 | `dashboard_url`                                | `http://acme.localhost`                                     |
 | `dashboard_username`                           | `admin`                                                     |
 | `dashboard_password`                           | a random password, shown only this once and now saved for you |
@@ -994,7 +994,7 @@ $Vault.agency_verified_skills | Format-Table id,active -AutoSize
 "Learned skills: $($Vault.learned_skills.Count)"
 ```
 
-**Expected:** `lead-qualification` is active, and `Learned skills: 0`.
+**Expected:** `sales-rep-inbox` is active, and `Learned skills: 0`.
 
 **E6. Business memory: add, replace, reject, remove**
 
@@ -1112,7 +1112,7 @@ $BetaId = $Beta.client_id
 $Beta | Format-List status,synced_skills,container_port_dash,container_port_api
 ```
 
-**Expected:** status `active`, skills `ecommerce-lookup` and `lead-qualification` (the growth plan gets all of them), and ports `19001` and `19501`.
+**Expected:** status `active`, skills `catalog-keeper-ecommerce` and `sales-rep-inbox` (the growth plan gets all of them), and ports `19001` and `19501`.
 
 **F2. One client's credentials do not work on another**
 

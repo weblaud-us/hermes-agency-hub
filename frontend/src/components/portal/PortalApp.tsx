@@ -19,10 +19,11 @@ import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useId, useState, type CSSProperties, type ReactNode } from "react";
 import { AgentSandboxDrawer } from "@/components/portal/AgentSandboxDrawer";
 import { ApprovalCenter } from "@/components/portal/ApprovalCenter";
-import { BusinessKnowledgeSetup } from "@/components/portal/BusinessKnowledgeSetup";
+import { BusinessKnowledgeSetup, type KnowledgeViewRequest } from "@/components/portal/BusinessKnowledgeSetup";
 import { ChannelsHub } from "@/components/portal/ChannelsHub";
 import { OverviewTab } from "@/components/portal/OverviewTab";
 import { PortalHeader } from "@/components/portal/PortalHeader";
+import { QuickstartChecklist, type QuickstartTab, type QuickstartView } from "@/components/portal/QuickstartChecklist";
 import { RoiGrowthFunnel } from "@/components/portal/RoiGrowthFunnel";
 import { SocialAutopilotMonitor } from "@/components/portal/SocialAutopilotMonitor";
 import { SecretInput } from "@/components/ui/SecretInput";
@@ -39,7 +40,7 @@ import {
   type PortalProfile,
 } from "@/lib/portal-api";
 import { fetchMe, goTo, logout, type SessionUser } from "@/lib/auth";
-import { LanguageToggle, LocaleProvider, useI18n } from "@/lib/i18n";
+import { LocaleProvider, useI18n } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/i18n-messages";
 import { SPRING } from "@/lib/motion";
 
@@ -153,10 +154,7 @@ function PortalGate({
         className="surface sheen w-full max-w-md rounded-3xl p-6 sm:p-8"
       >
         <p className="font-mono text-xs uppercase tracking-[0.18em] text-signal">{company}</p>
-        <div className="flex items-start justify-between gap-3">
-          <h1 className="mt-3 text-2xl font-semibold tracking-tight text-ink">{t("portal.subtitle")}</h1>
-          <LanguageToggle className="mt-2 shrink-0" />
-        </div>
+        <h1 className="mt-3 text-2xl font-semibold tracking-tight text-ink">{t("portal.subtitle")}</h1>
         <p className="mt-2 text-sm leading-relaxed text-ink-2">{t("portal.gateBody")}</p>
         <Link
           href={`/login?tab=client&next=${encodeURIComponent(`/portal/${subdomain}`)}`}
@@ -213,6 +211,9 @@ function PortalBody({ subdomain }: { subdomain: string }) {
   // Panels mount on first visit and stay mounted, so switching back keeps their
   // data and scroll position rather than loading again.
   const [visited, setVisited] = useState<Set<Tab>>(() => new Set([tab]));
+  // Bumped whenever something that could finish a quickstart step may have changed.
+  const [setupVersion, setSetupVersion] = useState(0);
+  const [knowledgeRequest, setKnowledgeRequest] = useState<KnowledgeViewRequest | undefined>(undefined);
 
   const client = connection?.mode === "live" || connection?.mode === "mock" ? connection.client : null;
 
@@ -280,11 +281,18 @@ function PortalBody({ subdomain }: { subdomain: string }) {
   }, [client, refreshOverview, refreshProfile]);
 
   function selectTab(next: Tab) {
+    setSetupVersion((version) => version + 1);
     setTab(next);
     setVisited((current) => (current.has(next) ? current : new Set(current).add(next)));
     const url = new URL(window.location.href);
     url.searchParams.set("tab", next);
     window.history.replaceState(window.history.state, "", url);
+  }
+
+  function goToStep(next: QuickstartTab, view?: QuickstartView) {
+    if (next === "knowledge" && view) setKnowledgeRequest((current) => ({ view, nonce: (current?.nonce ?? 0) + 1 }));
+    selectTab(next);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function signOut() {
@@ -350,6 +358,10 @@ function PortalBody({ subdomain }: { subdomain: string }) {
         onSignOut={signOut}
       />
 
+      <div className="mt-4">
+        <QuickstartChecklist client={client} subdomain={subdomain} refreshKey={setupVersion} onGo={goToStep} />
+      </div>
+
       {overviewError && !overview && (
         <div role="alert" className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-halt/30 bg-halt/8 px-4 py-3 text-sm text-halt-soft">
           <p>{overviewError}</p>
@@ -410,8 +422,14 @@ function PortalBody({ subdomain }: { subdomain: string }) {
                   mode={profile?.businessMode ?? "general"}
                 />
               )}
-              {value === "social" && <SocialAutopilotMonitor client={client} onChanged={refreshProfile} />}
-              {value === "knowledge" && <BusinessKnowledgeSetup client={client} onChanged={refreshOverview} />}
+              {value === "social" && <SocialAutopilotMonitor
+                  client={client}
+                  onChanged={() => {
+                    refreshProfile();
+                    setSetupVersion((version) => version + 1);
+                  }}
+                />}
+              {value === "knowledge" && <BusinessKnowledgeSetup client={client} onChanged={refreshOverview} requestedView={knowledgeRequest} />}
               {value === "growth" && <RoiGrowthFunnel client={client} />}
               {value === "approvals" && (
                 <ApprovalCenter client={client} currency={profile?.currency ?? "USD"} onChanged={refreshProfile} />

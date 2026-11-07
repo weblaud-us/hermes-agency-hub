@@ -137,10 +137,8 @@ export const SHARED_SKILLS: { id: string; label: string; ecommerceOnly?: boolean
   { id: "email-outreach-assistant", label: "Email Assistant" },
   { id: "web-seo-manager", label: "Web Manager" },
   { id: "roi-weekly-reporter", label: "Reporter" },
-  { id: "lead-qualification", label: "Lead Qualifier" },
   { id: "order-desk-ecommerce", label: "Order Desk", ecommerceOnly: true },
   { id: "catalog-keeper-ecommerce", label: "Catalog Keeper", ecommerceOnly: true },
-  { id: "ecommerce-lookup", label: "Order Lookup", ecommerceOnly: true },
 ];
 
 export interface ProvisionForm {

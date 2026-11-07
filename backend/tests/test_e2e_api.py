@@ -94,7 +94,7 @@ class TestOnboardingLifecycle:
         assert body["dashboard_url"] == "http://acme.localhost"
         assert body["api_base_url"] == "http://acme.localhost/v1"
         assert body["container_name"] == "hermes-client-acme"
-        assert body["synced_skills"] == ["lead-qualification"]
+        assert body["synced_skills"] == ["sales-rep-inbox"]
         assert uuid.UUID(body["client_id"])
 
     def test_the_returned_password_verifies_against_the_deployed_hash(self, hub):
@@ -156,7 +156,7 @@ class TestOnboardingLifecycle:
         tenant_dir = hub.tenant_dir(body["subdomain"])
         assert (tenant_dir / ".env").is_file()
         assert (tenant_dir / "config.yaml").is_file()
-        assert (tenant_dir / "skills" / "lead-qualification" / "SKILL.md").is_file()
+        assert (tenant_dir / "skills" / "sales-rep-inbox" / "SKILL.md").is_file()
 
     def test_the_subdomain_is_derived_from_the_company_name(self, hub):
         body = hub.onboard(subdomain=None, company_name="Globex Corporation").json()

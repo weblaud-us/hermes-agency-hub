@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -49,12 +49,32 @@ _test_limit = KeyedWindow(6, 60)
 _apply_limit = KeyedWindow(3, 600)
 
 _RESTART_KEYS = {
+    integrations.ENV_META_PAGE,
+    integrations.ENV_META_IG,
+    integrations.ENV_META_TOKEN,
     integrations.ENV_TELEGRAM_TOKEN,
     integrations.ENV_TELEGRAM_USERS,
     integrations.ENV_WA_TOKEN,
     integrations.ENV_WA_PHONE_ID,
     integrations.ENV_WA_VERIFY,
 }
+
+
+async def _restart_coordinator(docker: DockerService, settings: Settings, client: Client) -> bool:
+    """Restart the tenant's container. ``False`` for any reason it did not happen.
+
+    A daemon that is offline (a local install with no Docker, or a mock) and a tenant with
+    no container yet are both normal; the saved settings simply wait for the next start.
+    The restart budget is spent quietly: a save is never refused because of it.
+    """
+    try:
+        _apply_limit.check(client.slug)
+        return await docker.restart(_container_name(settings, client))
+    except HTTPException:
+        logger.info("Restart budget used for %s; the settings wait for the next restart.", client.slug)
+    except Exception as exc:  # noqa: BLE001 - the SDK raises more than OrchestratorError here
+        logger.warning("Could not restart %s: %s", client.slug, type(exc).__name__)
+    return False
 
 
 def _is_staff(actor: PortalActor) -> bool:
@@ -234,21 +254,17 @@ async def put_integrations(
             "ai_model": integrations.PRESET_BY_KEY[payload.ai_preset].model,
         }
 
+    # New credentials only take effect once the Coordinator has re-read its environment, so a
+    # change restarts it without a second click. ``apply_now`` is still accepted from older
+    # callers and no longer decides anything.
     needs_restart = bool(touched & _RESTART_KEYS) or payload.ai_preset is not None
     restart, detail = "unchanged", "Saved."
-    if needs_restart and payload.apply_now:
-        _apply_limit.check(client.slug)
-        try:
-            restarted = await docker.restart(_container_name(settings, client))
-        except Exception as exc:  # noqa: BLE001 - the SDK raises more than OrchestratorError here
-            logger.warning("Could not restart %s: %s", client.slug, type(exc).__name__)
-            restarted = False
+    if needs_restart:
+        restarted = await _restart_coordinator(docker, settings, client)
         if restarted:
             restart, detail = "applied", "Saved. Your Coordinator is restarting and will use the new settings in about a minute."
         else:
             restart, detail = "pending", "Saved, but the Coordinator could not be restarted just now. The new settings apply at its next restart."
-    elif needs_restart:
-        restart, detail = "pending", "Saved. The new settings apply the next time your Coordinator restarts."
 
     # Which settings changed, never their values.
     await _audit(

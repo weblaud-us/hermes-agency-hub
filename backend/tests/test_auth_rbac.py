@@ -195,10 +195,57 @@ class TestLogin:
     async def test_repeated_failures_are_rate_limited(self, seeded: Hub):
         codes = [
             seeded.http.post(LOGIN, json={"email": "sakib@weblaud.com", "password": "nope"}).status_code
-            for _ in range(9)
+            for _ in range(6)
         ]
-        assert codes[:8] == [401] * 8
-        assert codes[8] == 429
+        assert codes[:5] == [401] * 5
+        assert codes[5] == 429
+
+    async def test_a_locked_address_refuses_even_the_right_password(self, seeded: Hub):
+        for _ in range(5):
+            seeded.http.post(LOGIN, json={"email": "sakib@weblaud.com", "password": "nope"})
+        response = seeded.http.post(LOGIN, json={"email": "sakib@weblaud.com", "password": PASSWORD})
+        assert response.status_code == 429
+        assert response.headers["retry-after"] == "900"
+
+    async def test_correct_sign_ins_never_use_up_the_budget(self, seeded: Hub):
+        codes = [
+            seeded.http.post(LOGIN, json={"email": "sakib@weblaud.com", "password": PASSWORD}).status_code
+            for _ in range(12)
+        ]
+        assert codes == [200] * 12
+
+    async def test_one_caller_guessing_across_addresses_is_stopped_by_its_ip(self, seeded: Hub):
+        emails = [f"nobody{n}@weblaud.com" for n in range(6)]
+        codes = [seeded.http.post(LOGIN, json={"email": e, "password": "nope"}).status_code for e in emails]
+        assert codes[:5] == [401] * 5
+        assert codes[5] == 429
+
+    async def test_another_ip_is_not_locked_out_by_someone_elses_guesses(self, seeded: Hub):
+        seeded.settings.trust_proxy_headers = True
+        attacker = {"X-Forwarded-For": "203.0.113.9"}
+        for _ in range(5):
+            seeded.http.post(LOGIN, json={"email": "nobody@weblaud.com", "password": "nope"}, headers=attacker)
+        assert seeded.http.post(
+            LOGIN, json={"email": "nobody2@weblaud.com", "password": "nope"}, headers=attacker
+        ).status_code == 429
+        visitor = {"X-Forwarded-For": "198.51.100.4"}
+        response = seeded.http.post(
+            LOGIN, json={"email": "sakib@weblaud.com", "password": PASSWORD}, headers=visitor
+        )
+        assert response.status_code == 200
+
+    async def test_forwarded_addresses_are_ignored_unless_trusted(self, seeded: Hub):
+        # Every request here is from the same socket address, so a spoofed header must not
+        # buy a fresh budget.
+        codes = [
+            seeded.http.post(
+                LOGIN,
+                json={"email": f"nobody{n}@weblaud.com", "password": "nope"},
+                headers={"X-Forwarded-For": f"203.0.113.{n}"},
+            ).status_code
+            for n in range(6)
+        ]
+        assert codes[5] == 429
 
 
 # ======================================================================
@@ -375,8 +422,23 @@ class TestMagicOtp:
         for _ in range(seeded.settings.otp_max_attempts):
             response = seeded.http.post(OTP, json={"identifier": "owner@suvana.com", "code": wrong})
             assert response.status_code == 401
-        # Even the right code no longer works: the attempts were counted.
-        assert seeded.http.post(OTP, json={"identifier": "owner@suvana.com", "code": code}).status_code == 401
+        # Even the right code no longer works: the attempts were counted, and the caller is
+        # now locked out for the rest of the window.
+        assert seeded.http.post(OTP, json={"identifier": "owner@suvana.com", "code": code}).status_code in {401, 429}
+
+    async def test_five_wrong_codes_lock_verification_for_the_address_and_the_ip(self, seeded: Hub):
+        wrong = "000000"
+        verify = "/api/v1/auth/magic-otp/verify"
+        for _ in range(5):
+            self._request(seeded)
+            seeded.http.post(verify, json={"identifier": "owner@suvana.com", "code": wrong})
+        code = self._request(seeded)
+        response = seeded.http.post(verify, json={"identifier": "owner@suvana.com", "code": "123456"})
+        assert response.status_code == 429
+        assert code.status_code in {200, 429}
+        # Another identifier from the same IP is stopped too.
+        other = seeded.http.post(verify, json={"identifier": "other@suvana.com", "code": wrong})
+        assert other.status_code == 429
 
     async def test_an_expired_code_is_refused(self, seeded: Hub):
         seeded.settings.otp_ttl_minutes = -1

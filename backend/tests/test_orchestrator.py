@@ -605,13 +605,13 @@ class TestBootstrap:
         # The canonical library is baked into the hub image at a path the
         # daemon cannot resolve, so it cannot be a bind source directly.
         await provisioner.bootstrap()
-        published = settings.skills_publish_dir / "lead-qualification" / "SKILL.md"
+        published = settings.skills_publish_dir / "sales-rep-inbox" / "SKILL.md"
         assert published.is_file()
 
     async def test_is_idempotent(self, provisioner, settings, skills_library):
         await provisioner.bootstrap()
         await provisioner.bootstrap()
-        assert (settings.skills_publish_dir / "lead-qualification").is_dir()
+        assert (settings.skills_publish_dir / "sales-rep-inbox").is_dir()
 
     async def test_survives_a_missing_shared_library(self, provisioner, settings):
         # A fresh deployment that has not populated shared-skills/ yet must
@@ -631,16 +631,16 @@ class TestProvisioningCreatesState:
         assert tenant_dir.is_dir()
         assert (tenant_dir / ".env").is_file()
         assert (tenant_dir / "config.yaml").is_file()
-        assert (tenant_dir / "skills" / "lead-qualification" / "SKILL.md").is_file()
+        assert (tenant_dir / "skills" / "sales-rep-inbox" / "SKILL.md").is_file()
 
     async def test_only_plan_entitled_skills_are_synced(
         self, provisioner, settings, session, make_db_client, skills_library
     ):
         client = await make_db_client()
         result = await provisioner.provision_client(session, client, "sk-or-key")
-        assert result.synced_skills == ["lead-qualification"]
+        assert result.synced_skills == ["sales-rep-inbox"]
         assert not (
-            settings.tenant_dir_for(client.subdomain) / "skills" / "ecommerce-lookup"
+            settings.tenant_dir_for(client.subdomain) / "skills" / "web-seo-manager"
         ).exists()
 
     async def test_the_resource_envelope_reaches_the_daemon(
@@ -1252,7 +1252,7 @@ class TestTeardown:
         archive = Path(result.archive_path)
         assert (archive / ".env").is_file()
         assert (archive / "config.yaml").is_file()
-        assert (archive / "skills" / "lead-qualification").is_dir()
+        assert (archive / "skills" / "sales-rep-inbox").is_dir()
         assert "sk-or-super-secret" in (archive / ".env").read_text(encoding="utf-8")
 
     async def test_conversation_data_survives_the_archive(

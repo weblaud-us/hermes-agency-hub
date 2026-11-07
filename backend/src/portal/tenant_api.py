@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 _transport: httpx.AsyncBaseTransport | None = None
 
 TELEGRAM_API = "https://api.telegram.org"
+WHATSAPP_API = "https://graph.facebook.com/v21.0"
 
 
 async def call(
@@ -65,5 +66,29 @@ async def send_telegram_message(bot_token: str, chat_id: str, text: str) -> bool
             )
     except httpx.HTTPError as exc:
         logger.warning("Telegram test message failed: %s", type(exc).__name__)
+        return False
+    return response.status_code == 200
+
+
+async def send_whatsapp_text(access_token: str, phone_number_id: str, to: str, text: str) -> bool:
+    """Send one text through the tenant's own WhatsApp Cloud API number.
+
+    Reported as ``False`` and logged by type only, for the same reason as Telegram: the
+    request carries the access token.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10.0, transport=_transport) as http:
+            response = await http.post(
+                f"{WHATSAPP_API}/{phone_number_id}/messages",
+                headers={"Authorization": f"Bearer {access_token}"},
+                json={
+                    "messaging_product": "whatsapp",
+                    "to": to,
+                    "type": "text",
+                    "text": {"body": text[:4000], "preview_url": False},
+                },
+            )
+    except httpx.HTTPError as exc:
+        logger.warning("WhatsApp send failed: %s", type(exc).__name__)
         return False
     return response.status_code == 200

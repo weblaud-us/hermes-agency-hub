@@ -201,8 +201,8 @@ class IntegrationsUpdate(BaseModel):
     whatsapp_cloud: WhatsAppCloudUpdate | None = None
     meta: MetaUpdate | None = None
     ai_preset: AiPresetKey | None = None
-    #: Restart the Coordinator afterwards so new credentials take effect.
-    apply_now: bool = False
+    #: Ignored: a change that needs a restart now always restarts. Kept so older callers still validate.
+    apply_now: bool = True
 
 
 class SecretStatus(BaseModel):

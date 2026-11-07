@@ -312,6 +312,18 @@ def media_dir(settings: Settings, slug: str) -> Path:
     return settings.social_media_dir / slug
 
 
+def public_image_url(settings: Settings, slug: str, filename: str | None) -> str | None:
+    """Where a generated visual can be fetched without signing in.
+
+    Instagram's Graph API takes an ``image_url`` and fetches it itself, so this has to be
+    a public address. The route that serves it is ``social_router.public_media``.
+    """
+    if not filename:
+        return None
+    origin = (settings.social_public_base_url or settings.hub_public_url).rstrip("/")
+    return f"{origin}{settings.api_prefix}/public/media/{slug}/{filename}"
+
+
 @dataclass(frozen=True)
 class MetaCredentials:
     page_id: str
@@ -519,10 +531,9 @@ async def publish(
     """Publish an approved post. Returns the sandbox sample comments it produced."""
     creds = await asyncio.to_thread(meta_credentials, settings, client)
     live = creds is not None
-    base = settings.social_public_base_url.rstrip("/")
     image_ref = (
-        f"{base}/{client.slug}/{post.image_filename}"
-        if live and base
+        public_image_url(settings, client.slug, post.image_filename)
+        if live
         else str(media_dir(settings, client.slug) / (post.image_filename or ""))
     )
     try:
@@ -607,6 +618,28 @@ async def _sandbox_conversation(
         made.append(comment)
     await session.flush()
     return made
+
+
+async def reply_to_comment(
+    settings: Settings, client: Client, comment_id: str, public_reply: str, dm_text: str
+) -> str | None:
+    """Reply to a real comment publicly and in the commenter's inbox.
+
+    Returns the receipt status (``replied_live``), or ``None`` when this tenant has no
+    Meta credentials: a sandbox receipt for a real customer would claim a reply that was
+    never sent. Raises :class:`SocialError` when the script or Meta fails.
+    """
+    creds = await asyncio.to_thread(meta_credentials, settings, client)
+    if creds is None:
+        return None
+    receipt = await _run_script(
+        settings,
+        "meta_publisher.py",
+        ["reply-comment", "--comment-id", comment_id, "--public-reply", public_reply,
+         "--private-dm", dm_text],
+        _script_env(settings, creds),
+    )
+    return str(receipt.get("status", ""))[:24] or None
 
 
 async def on_owner_decision(

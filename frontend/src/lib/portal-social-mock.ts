@@ -124,6 +124,7 @@ export function createSocialMock(company: string, subdomain: string): SocialView
       hashtags: topic.hashtags,
       platforms: ["facebook", "instagram"],
       hasImage: true,
+      imageUrl: null,
       visualEngine: "studio_canvas_overlay",
       publishMode: published ? "sandbox" : null,
       permalink: null,

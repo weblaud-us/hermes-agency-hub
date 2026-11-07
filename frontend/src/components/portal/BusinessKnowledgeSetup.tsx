@@ -12,7 +12,8 @@ import { SPRING } from "@/lib/motion";
 import type { PortalClient } from "@/lib/portal-api";
 import { cn } from "@/lib/utils";
 
-type View = "profile" | "catalog" | "brand" | "faq";
+export type KnowledgeView = "profile" | "catalog" | "brand" | "faq";
+type View = KnowledgeView;
 
 const HEX = /^#[0-9A-Fa-f]{6}$/;
 const PHONE = /^\+?[0-9][0-9 ()\-.]{4,38}$/;
@@ -60,12 +61,31 @@ function validate(draft: Draft): { view: View; message: string } | null {
   return null;
 }
 
-export function BusinessKnowledgeSetup({ client, onChanged }: { client: PortalClient; onChanged?: () => void }) {
+/** A deep link into one section. The nonce makes asking for the same section twice still count. */
+export interface KnowledgeViewRequest {
+  view: KnowledgeView;
+  nonce: number;
+}
+
+export function BusinessKnowledgeSetup({
+  client,
+  onChanged,
+  requestedView,
+}: {
+  client: PortalClient;
+  onChanged?: () => void;
+  requestedView?: KnowledgeViewRequest;
+}) {
   const notify = useToast();
   const [saved, setSaved] = useState<BusinessSetupView | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [view, setView] = useState<View>("profile");
+  const [view, setView] = useState<View>(requestedView?.view ?? "profile");
+  const [seenRequest, setSeenRequest] = useState(requestedView?.nonce ?? 0);
+  if (requestedView && requestedView.nonce !== seenRequest) {
+    setSeenRequest(requestedView.nonce);
+    setView(requestedView.view);
+  }
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
 

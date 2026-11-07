@@ -282,6 +282,8 @@ export interface SocialPost {
   hashtags: string[];
   platforms: string[];
   hasImage: boolean;
+  /** Public https address of the visual: the same one Instagram is given to fetch. */
+  imageUrl: string | null;
   visualEngine: string | null;
   /** `sandbox` is a recorded dry run: nothing reached Meta. */
   publishMode: "live" | "sandbox" | null;
@@ -347,6 +349,41 @@ export interface Roster {
   rosters: Record<BusinessMode, RosterAgent[]>;
 }
 
+export type RecordKind = "lead" | "order";
+export type RecordStatus = "new" | "booked" | "completed" | "pending" | "dispatched" | "delivered";
+export type Qualification = "hot" | "warm";
+export type CodStatus = "pending" | "collected" | "prepaid";
+
+/** A captured lead or appointment, or an order, from the owner's own sheet. */
+export interface WorkRecord {
+  id: string;
+  /** The short code the owner reads out to a customer, such as ORD-4F2A9C. */
+  ref: string;
+  kind: RecordKind;
+  status: RecordStatus;
+  customerName: string;
+  contact: string;
+  source: string;
+  message: string;
+  serviceRequested: string;
+  preferredDate: string;
+  qualification: Qualification;
+  items: string;
+  totalUsd: number;
+  codStatus: CodStatus;
+  courier: string;
+  trackingNumber: string;
+  dispatchedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type RecordInput = Partial<Omit<WorkRecord, "id" | "ref" | "dispatchedAt" | "createdAt" | "updatedAt">> & {
+  kind: RecordKind;
+  customerName: string;
+};
+export type RecordChanges = Partial<Omit<WorkRecord, "id" | "ref" | "kind" | "source" | "dispatchedAt" | "createdAt" | "updatedAt">>;
+
 export interface PortalClient {
   readonly mode: "live" | "mock";
   /** Business setup, catalog, channel credentials and AI usage. */
@@ -358,6 +395,9 @@ export interface PortalClient {
   guardrails(): Promise<GuardrailItem[]>;
   setGuardrail(key: string, lane: "automatic" | "owner"): Promise<GuardrailItem[]>;
   workspace(): Promise<WorkspaceView>;
+  records(kind?: RecordKind): Promise<WorkRecord[]>;
+  createRecord(input: RecordInput): Promise<WorkRecord>;
+  updateRecord(id: string, changes: RecordChanges): Promise<WorkRecord>;
   roster(): Promise<Roster>;
   socialAutopilot(): Promise<SocialAutopilot>;
   updateSocialSettings(patch: SocialSettingsPatch): Promise<SocialAutopilot>;
@@ -624,6 +664,7 @@ interface SocialPostWire {
   hashtags: string[];
   platforms: string[];
   has_image: boolean;
+  image_url: string | null;
   visual_engine: string | null;
   publish_mode: "live" | "sandbox" | null;
   permalink: string | null;
@@ -658,6 +699,76 @@ interface SocialWire {
   comments: SocialCommentWire[];
 }
 
+interface RecordWire {
+  id: string;
+  ref: string;
+  kind: RecordKind;
+  status: RecordStatus;
+  customer_name: string;
+  contact: string;
+  source: string;
+  message: string;
+  service_requested: string;
+  preferred_date: string;
+  qualification: Qualification;
+  items: string;
+  total_usd: number;
+  cod_status: CodStatus;
+  courier: string;
+  tracking_number: string;
+  dispatched_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+const toRecord = (wire: RecordWire): WorkRecord => ({
+  id: wire.id,
+  ref: wire.ref,
+  kind: wire.kind,
+  status: wire.status,
+  customerName: wire.customer_name,
+  contact: wire.contact,
+  source: wire.source,
+  message: wire.message,
+  serviceRequested: wire.service_requested,
+  preferredDate: wire.preferred_date,
+  qualification: wire.qualification,
+  items: wire.items,
+  totalUsd: wire.total_usd,
+  codStatus: wire.cod_status,
+  courier: wire.courier,
+  trackingNumber: wire.tracking_number,
+  dispatchedAt: wire.dispatched_at,
+  createdAt: wire.created_at,
+  updatedAt: wire.updated_at,
+});
+
+/** The wire names, for the fields a record form or an inline edit can send. */
+const RECORD_FIELDS: Record<string, string> = {
+  kind: "kind",
+  status: "status",
+  customerName: "customer_name",
+  contact: "contact",
+  source: "source",
+  message: "message",
+  serviceRequested: "service_requested",
+  preferredDate: "preferred_date",
+  qualification: "qualification",
+  items: "items",
+  totalUsd: "total_usd",
+  codStatus: "cod_status",
+  courier: "courier",
+  trackingNumber: "tracking_number",
+};
+
+function recordBody(fields: object): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    if (value !== undefined && key in RECORD_FIELDS) body[RECORD_FIELDS[key]] = value;
+  }
+  return body;
+}
+
 const toBrandKit = (wire: BrandKitWire): BrandKit => ({
   primaryColor: wire.primary_color,
   accentColor: wire.accent_color,
@@ -675,6 +786,7 @@ const toSocialPost = (wire: SocialPostWire): SocialPost => ({
   hashtags: wire.hashtags,
   platforms: wire.platforms,
   hasImage: wire.has_image,
+  imageUrl: wire.image_url,
   visualEngine: wire.visual_engine,
   publishMode: wire.publish_mode,
   permalink: wire.permalink,
@@ -853,6 +965,21 @@ function createLivePortal(subdomain: string, token: string | null): PortalClient
           updatedAt: record.updated_at,
         })),
       };
+    },
+
+    async records(kind) {
+      const body = await get<{ records: RecordWire[] }>(kind ? `records?kind=${kind}` : "records");
+      return body.records.map(toRecord);
+    },
+
+    async createRecord(input) {
+      return toRecord(await send<RecordWire>("records", { method: "POST", body: recordBody(input) }));
+    },
+
+    async updateRecord(id, changes) {
+      return toRecord(
+        await send<RecordWire>(`records/${encodeURIComponent(id)}`, { method: "PATCH", body: recordBody(changes) }),
+      );
     },
 
     async roster() {

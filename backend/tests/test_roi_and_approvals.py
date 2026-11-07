@@ -673,7 +673,7 @@ class TestSkillSelection:
     @pytest.fixture
     def library(self, settings):
         for name in (
-            "ai-employee-orchestrator", "lead-qualification", "social-media-autopilot", "designer-brand-studio",
+            "ai-employee-orchestrator", "sales-rep-inbox", "social-media-autopilot", "designer-brand-studio",
             "roi-weekly-reporter", "ads-growth-manager", "order-desk-ecommerce", "catalog-keeper-ecommerce",
         ):
             directory = settings.shared_skills_dir / name
@@ -753,7 +753,7 @@ class TestKitsAndLibraryRoutes:
 
     def test_a_kit_can_be_edited_and_restored(self, hub: Hub):
         body = hub.http.patch(
-            "/api/v1/kits/dental_clinic", headers=AUTH, json={"description": "Edited.", "skills": ["lead-qualification"]}
+            "/api/v1/kits/dental_clinic", headers=AUTH, json={"description": "Edited.", "skills": ["sales-rep-inbox"]}
         )
         assert body.status_code == 200
         kit = next(row for row in body.json() if row["key"] == "dental_clinic")
@@ -773,7 +773,7 @@ class TestKitsAndLibraryRoutes:
 
     def test_the_library_returns_the_full_text(self, hub: Hub):
         rows = hub.http.get("/api/v1/skills", headers=AUTH).json()
-        assert {row["id"] for row in rows} == {"lead-qualification", "ecommerce-lookup"}
+        assert {row["id"] for row in rows} == {"sales-rep-inbox", "web-seo-manager"}
         assert rows[0]["markdown"].startswith("# ")
 
 

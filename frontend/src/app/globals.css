@@ -56,7 +56,7 @@
 }
 
 @theme inline {
-  --font-sans: var(--font-jakarta), var(--font-bengali), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-jetbrains), ui-monospace, "SFMono-Regular", monospace;
 }
 

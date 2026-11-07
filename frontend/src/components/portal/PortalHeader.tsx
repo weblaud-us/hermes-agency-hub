@@ -5,7 +5,7 @@ import { LogOut, MessageSquareText } from "lucide-react";
 import { ProfileMenu } from "@/components/auth/ProfileMenu";
 import { StatusOrb, type OrbTone } from "@/components/ui/StatusOrb";
 import type { SessionUser } from "@/lib/auth";
-import { LanguageToggle, useI18n } from "@/lib/i18n";
+import { useI18n } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/i18n-messages";
 import type { AgentStatus, PortalOverview } from "@/lib/portal-api";
 import { SPRING } from "@/lib/motion";
@@ -72,7 +72,6 @@ export function PortalHeader({ company, overview, user, canSignOut, onAsk, onSig
         )}
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          <LanguageToggle />
           <motion.button
             type="button"
             whileHover={{ y: -1 }}

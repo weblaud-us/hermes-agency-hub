@@ -106,9 +106,9 @@ const SUVANA: Profile = {
     { id: "inventory-velocity", title: "Inventory Velocity Analysis", category: "Operations", description: "Watches sell-through by SKU and warns before a fast mover runs out." },
   ],
   skills: [
-    { id: "custom-exchange-policy", title: "Custom Exchange Policy Handler", category: "Customer Care", description: "Handles size and colour exchanges under your 7-day rule.", trigger: "A customer asks to swap an item within 7 days of delivery.", steps: ["Confirm the order number and delivery date.", "Check the replacement size is in stock.", "Offer a free swap inside Dhaka, or 70 BDT courier cost outside.", "Create the exchange note and share a pickup window."], usedDaysAgo: 0, uses: 214 },
+    { id: "custom-exchange-policy", title: "Custom Exchange Policy Handler", category: "Customer Care", description: "Handles size and colour exchanges under your 7-day rule.", trigger: "A customer asks to swap an item within 7 days of delivery.", steps: ["Confirm the order number and delivery date.", "Check the replacement size is in stock.", "Offer a free swap in the metro area, or $6 courier cost outside.", "Create the exchange note and share a pickup window."], usedDaysAgo: 0, uses: 214 },
     { id: "friday-flash-sale-hold", title: "Friday Flash-Sale Stock Hold", category: "Operations", description: "Reserves flash-sale stock for 2 hours after a customer commits.", trigger: "A customer confirms an item during a Friday flash sale.", steps: ["Mark the SKU as held for 2 hours.", "Send the payment link and the hold expiry time.", "Release the stock automatically if payment does not arrive."], usedDaysAgo: 3, uses: 96 },
-    { id: "cod-risk-check", title: "Cash-on-Delivery Risk Check", category: "Orders", description: "Asks for a confirmation call on large first-time cash orders.", trigger: "A first-time customer places a cash order above 5,000 BDT.", steps: ["Compare the phone number with past orders.", "Ask the customer to confirm the address by message.", "Flag the order for staff review if there is no reply in 2 hours."], usedDaysAgo: 1, uses: 141 },
+    { id: "cod-risk-check", title: "Cash-on-Delivery Risk Check", category: "Orders", description: "Asks for a confirmation call on large first-time cash orders.", trigger: "A first-time customer places a cash order above $50.", steps: ["Compare the phone number with past orders.", "Ask the customer to confirm the address by message.", "Flag the order for staff review if there is no reply in 2 hours."], usedDaysAgo: 1, uses: 141 },
     { id: "vip-early-access", title: "VIP Early Access Replies", category: "Sales", description: "Gives repeat buyers the new-collection preview before launch.", trigger: "A customer with 5 or more past orders asks about a new collection.", steps: ["Confirm they are on the VIP list.", "Share the preview album.", "Offer to hold a size until launch day."], usedDaysAgo: 2, uses: 58 },
     { id: "bulk-corporate-enquiry", title: "Corporate Gifting Enquiries", category: "Sales", description: "Collects what the sales team needs for a bulk quote.", trigger: "Someone asks about 10 or more pieces, or corporate gifting.", steps: ["Ask for quantity, delivery date and budget.", "Share the corporate catalogue.", "Escalate to the store manager with a summary."], usedDaysAgo: 5, uses: 23 },
     { id: "size-guide-advisor", title: "Size Guide Advisor", category: "Customer Care", description: "Recommends a size from height and fit preference.", trigger: "A customer asks which size to buy.", steps: ["Ask for height and preferred fit.", "Match against the size chart.", "Recommend one size and mention the exchange rule."], usedDaysAgo: 0, uses: 302 },
@@ -120,7 +120,7 @@ const SUVANA: Profile = {
     { id: "review-request", title: "Post-Delivery Review Request", category: "Sales", description: "Asks for a review three days after a happy delivery.", trigger: "An order has been delivered for 3 days with no complaint.", steps: ["Send one friendly review request.", "Never ask the same customer twice in 30 days."], usedDaysAgo: 0, uses: 126 },
   ],
   memory: [
-    ["mem-1", "Delivery inside Dhaka takes 24-48h (70 BDT); outside Dhaka takes 3-5 days (130 BDT)."],
+    ["mem-1", "Delivery in the metro area takes 24-48h ($6); everywhere else takes 3-5 days ($12)."],
     ["mem-2", "Exchanges are accepted within 7 days of delivery if the tag is still attached."],
     ["mem-3", "Friday flash sales run 8pm to 10pm, and stock holds last 2 hours."],
     ["mem-4", "Wholesale pricing starts at 20 pieces per design."],
@@ -139,7 +139,7 @@ const SUVANA: Profile = {
         metrics: [["Orders Verified", 42], ["Low-Stock Alerts", 3], ["VIP Inquiries Flagged", 2]],
         markdown: `## Yesterday at a glance
 
-**42 Orders Verified** against payment, totalling 186,400 BDT. That is up 12% on the same day last week.
+**42 Orders Verified** against payment, totalling $1,864. That is up 12% on the same day last week.
 
 ### Fastest moving
 
@@ -200,16 +200,16 @@ No lead has waited longer than 6 hours.`,
 
 | Supplier | Items | Est. cost | Lead time |
 | --- | --- | --- | --- |
-| Mirpur Weavers | 4 | 212,000 BDT | 6 days |
-| Narayanganj Mills | 3 | 96,500 BDT | 4 days |
-| Gulshan Trims | 2 | 18,200 BDT | 2 days |
+| Harbor Weavers | 4 | $2,120 | 6 days |
+| Northgate Mills | 3 | $965 | 4 days |
+| Lakeside Trims | 2 | $182 | 2 days |
 
 > Forecasts are estimates. Confirm quantities before you place an order.`,
       },
     },
   ],
   reply: (question) => {
-    if (/deliver|ship/i.test(question)) return "Delivery inside Dhaka takes 24-48 hours at 70 BDT. Outside Dhaka it takes 3-5 days at 130 BDT. I quote these on every order enquiry.";
+    if (/deliver|ship/i.test(question)) return "Delivery in the metro area takes 24-48 hours at $6. Everywhere else it takes 3-5 days at $12. I quote these on every order enquiry.";
     if (/exchange|return|refund/i.test(question)) return "Customers can exchange within 7 days of delivery if the tag is still attached. I handle the swap myself and only escalate disputes to your team.";
     if (/stock|inventory|sku/i.test(question)) return "Three items are running low: Jamdani Indigo, Linen Sand (M) and Cotton Panjabi White (L). Jamdani Indigo is the urgent one, with about 1.4 days of cover left.";
     return "I can look up orders, check stock, draft customer replies and run your briefings. What would you like me to check?";
@@ -328,7 +328,7 @@ function nextOccurrence(at: [number, number], everyDays: number, now: Date): Dat
 function factCategory(text: string): string {
   if (/\b(return|exchange|refund|polic|warranty|cancel)/i.test(text)) return "Policies";
   if (/\b(deliver|shipping|courier|dispatch)/i.test(text)) return "Delivery";
-  if (/\b(price|pricing|discount|cost|fee|BDT|USD)/i.test(text)) return "Pricing";
+  if (/\b(price|pricing|discount|cost|fee|USD)/i.test(text)) return "Pricing";
   if (/\b(customer|VIP|patient|client|member)/i.test(text)) return "Customers";
   if (/\b(open|closed|holiday|business hours)/i.test(text)) return "Hours";
   return "Operations";

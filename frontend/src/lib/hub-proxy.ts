@@ -67,6 +67,10 @@ export async function forwardToHub(
   }
 
   const headers: Record<string, string> = { ...extraHeaders };
+  // The hub rate-limits sign-in per caller, and from its side every request comes from this
+  // server. The visitor's address, as our own reverse proxy saw it, is passed on for that.
+  const visitor = (request.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || request.headers.get("x-real-ip");
+  if (visitor) headers["X-Forwarded-For"] = visitor;
   const cookie = sessionCookies(request);
   if (cookie) headers.Cookie = cookie;
   const requestType = request.headers.get("content-type");

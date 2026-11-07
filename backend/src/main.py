@@ -36,9 +36,11 @@ from .portal.errors import PortalError
 from .portal.growth_router import router as portal_growth_router
 from .portal.knowledge_router import router as portal_knowledge_router
 from .portal.portal_router import admin_router as portal_admin_router
+from .portal.social_router import public_router as public_media_router
 from .portal.social_router import router as portal_social_router
 from .portal.portal_router import router as portal_router
 from .proxy.service import NoPortAvailableError, ProxyError
+from .webhooks.router import router as webhooks_router
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +114,8 @@ def create_app() -> FastAPI:
     app.include_router(portal_social_router, prefix=settings.api_prefix)
     app.include_router(portal_knowledge_router, prefix=settings.api_prefix)
     app.include_router(portal_admin_router, prefix=settings.api_prefix)
+    app.include_router(public_media_router, prefix=settings.api_prefix)
+    app.include_router(webhooks_router, prefix=settings.api_prefix)
 
     # ---- domain errors -> status codes --------------------------------
     # Mapped centrally so routes can let these propagate instead of each

@@ -7,10 +7,11 @@ applies to it as much as to anything read from the tenant's files.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
-from typing import Any
+from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Body, Depends, Path, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,6 +36,7 @@ from ..ops.schemas import (
     WorkspaceRecordRead,
     WorkspaceView,
 )
+from . import knowledge, records as record_store
 from .errors import forbidden
 from .portal_router import PortalActor, require_actor, require_tenant, require_writable
 from .sanitize import scrub
@@ -199,3 +201,66 @@ async def workspace(
         business_mode=client.business_mode.value,
         records=[WorkspaceRecordRead.model_validate(row) for row in result.scalars()],
     )
+
+
+# ------------------------------------------------------------------ leads and orders
+@router.get(
+    "/records",
+    response_model=record_store.RecordsView,
+    summary="Captured leads, appointments and orders",
+)
+async def list_records(
+    kind: Literal["lead", "order"] | None = Query(default=None),
+    client: Client = Depends(require_tenant),
+    settings: Settings = Depends(get_settings),
+) -> record_store.RecordsView:
+    files = knowledge.files_for(settings, client)
+    return record_store.RecordsView(records=await asyncio.to_thread(record_store.list_records, files, kind))
+
+
+@router.post(
+    "/records",
+    response_model=record_store.RecordRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Add a lead, appointment or order by hand",
+)
+async def create_record(
+    payload: record_store.RecordCreate,
+    actor: PortalActor = Depends(require_actor),
+    client: Client = Depends(require_writable),
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> record_store.RecordRead:
+    _require_owner_authority(actor)
+    files = knowledge.files_for(settings, client)
+    record = await asyncio.to_thread(record_store.create_record, files, payload)
+    # The reference and the kind, never the customer's details.
+    await client_service.record_audit(
+        session, client, "portal.record.create", AuditStatus.SUCCEEDED,
+        f"{actor.label} added {record.ref}.", payload={"actor": actor.label, "ref": record.ref},
+    )
+    return record
+
+
+@router.patch(
+    "/records/{record_id}",
+    response_model=record_store.RecordRead,
+    summary="Update a record, move it along, or dispatch an order",
+)
+async def update_record(
+    record_id: str = Path(pattern=r"^[0-9a-f]{16}$"),
+    payload: record_store.RecordUpdate = Body(),
+    actor: PortalActor = Depends(require_actor),
+    client: Client = Depends(require_writable),
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> record_store.RecordRead:
+    _require_owner_authority(actor)
+    files = knowledge.files_for(settings, client)
+    record = await asyncio.to_thread(record_store.update_record, files, record_id, payload)
+    await client_service.record_audit(
+        session, client, "portal.record.update", AuditStatus.SUCCEEDED,
+        f"{actor.label} updated {record.ref}.",
+        payload={"actor": actor.label, "ref": record.ref, "status": record.status},
+    )
+    return record

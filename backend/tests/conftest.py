@@ -272,7 +272,7 @@ def skills_library(settings: Settings) -> Path:
     Two skills, only one of which the starter plan is entitled to, so the
     filtering is observable.
     """
-    for name in ("lead-qualification", "ecommerce-lookup"):
+    for name in ("sales-rep-inbox", "web-seo-manager"):
         directory = settings.shared_skills_dir / name
         directory.mkdir(parents=True, exist_ok=True)
         (directory / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
@@ -830,7 +830,7 @@ async def hub(tmp_path: Path, session_factory, monkeypatch) -> Hub:
     test_settings = make_settings(tmp_path)
 
     # A shared skill library, so onboarding has something real to sync.
-    for name in ("lead-qualification", "ecommerce-lookup"):
+    for name in ("sales-rep-inbox", "web-seo-manager"):
         skill_dir = test_settings.shared_skills_dir / name
         skill_dir.mkdir(parents=True, exist_ok=True)
         (skill_dir / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")

@@ -77,7 +77,7 @@ def seed_tenant(root: Path) -> None:
         json.dumps({"version": 1, "installed": {"hub-skill": {"source": "x"}}}),
     )
     write(root / "skills" / "hub-skill" / "SKILL.md", "# Third-party\n")
-    write(root / "skills" / "agency_core" / "lead-qualification" / "SKILL.md", AGENCY_PROMPT)
+    write(root / "skills" / "agency_core" / "sales-rep-inbox" / "SKILL.md", AGENCY_PROMPT)
     write(
         root / "skills" / "sales" / "custom-exchange-policy" / "SKILL.md",
         "---\nname: custom-exchange-policy\ndescription: Handle size exchanges. Use when a "
@@ -245,8 +245,8 @@ def onboard(hub: Hub, slug: str) -> Portal:
 
 @pytest_asyncio.fixture
 async def portal(hub: Hub) -> Portal:
-    (hub.settings.shared_skills_dir / "lead-qualification" / "SKILL.md").write_text(
-        "---\nname: lead-qualification\ndescription: Score inbound leads against the "
+    (hub.settings.shared_skills_dir / "sales-rep-inbox" / "SKILL.md").write_text(
+        "---\nname: sales-rep-inbox\ndescription: Score inbound leads against the "
         f"qualification matrix. Use when a new enquiry arrives.\n---\n# Body\n{AGENCY_PROMPT}\n",
         encoding="utf-8",
     )
@@ -525,7 +525,7 @@ class TestSkills:
     def test_agency_skills_describe_without_exposing_the_prompt(self, portal: Portal):
         skills = portal.get("/skills-and-memory").json()["agency_verified_skills"]
         assert len(skills) == 1
-        assert skills[0]["title"] == "Lead Qualification"
+        assert skills[0]["title"] == "Sales Rep Inbox"
         assert skills[0]["active"] is True
         assert skills[0]["description"] == "Score inbound leads against the qualification matrix."
         assert "workflow_markdown" not in skills[0]
@@ -559,7 +559,7 @@ class TestSkills:
         )["skills"]["disabled"] == []
 
     @pytest.mark.parametrize(
-        "skill_id", ["lead-qualification", "vendor-browser", "hub-skill", "nope", "..%2f..%2f.env"]
+        "skill_id", ["sales-rep-inbox", "vendor-browser", "hub-skill", "nope", "..%2f..%2f.env"]
     )
     def test_only_learned_skills_can_be_toggled(self, portal: Portal, skill_id: str):
         response = portal.patch(f"/skills/{skill_id}", json={"enabled": False})

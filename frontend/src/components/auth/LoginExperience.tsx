@@ -10,7 +10,7 @@ import { Segmented } from "@/components/ui/Segmented";
 import { Wordmark } from "@/components/ui/Wordmark";
 import { goTo, homeFor, login, requestOtp, safeNext, verifyOtp, type SessionUser } from "@/lib/auth";
 import { ApiError } from "@/lib/hub-types";
-import { LanguageToggle, LocaleProvider, useI18n } from "@/lib/i18n";
+import { LocaleProvider, useI18n } from "@/lib/i18n";
 import { riseIn, SPRING, staggerContainer } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
@@ -446,9 +446,8 @@ function LoginCard() {
         transition={SPRING}
         className="mx-auto w-full max-w-md lg:col-start-2"
       >
-        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <div className="mb-5">
           <Wordmark />
-          <LanguageToggle />
         </div>
 
         <div className="surface sheen rounded-3xl p-5 sm:p-7">

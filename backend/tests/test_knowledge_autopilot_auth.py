@@ -476,15 +476,28 @@ class TestIntegrations:
         assert body["restart"] == "applied"
         assert container.status == "running"
 
-    async def test_without_apply_now_the_restart_is_left_pending(self, weblaud: Hub):
+    async def test_a_change_restarts_the_coordinator_even_without_apply_now(self, weblaud: Hub):
+        seed_env(weblaud, "apex-dental")
+        container = weblaud.docker.seed_container(weblaud.settings.container_name_for("apex-dental"))
+        body = self.put(weblaud, {"telegram": {"bot_token": TELEGRAM_TOKEN}}).json()
+        assert body["restart"] == "applied"
+        assert container.status == "running"
+
+    async def test_the_restart_is_left_pending_when_there_is_nothing_to_restart(self, weblaud: Hub):
         seed_env(weblaud, "apex-dental")
         body = self.put(weblaud, {"telegram": {"bot_token": TELEGRAM_TOKEN}}).json()
         assert body["restart"] == "pending"
 
     async def test_a_setting_that_needs_no_restart_says_so(self, weblaud: Hub):
         seed_env(weblaud, "apex-dental")
-        body = self.put(weblaud, {"meta": {"page_id": "109876543210"}}).json()
+        body = self.put(weblaud, {}).json()
         assert body["restart"] == "unchanged"
+
+    async def test_meta_credentials_restart_it_too(self, weblaud: Hub):
+        seed_env(weblaud, "apex-dental")
+        weblaud.docker.seed_container(weblaud.settings.container_name_for("apex-dental"))
+        body = self.put(weblaud, {"meta": {"page_id": "109876543210"}}).json()
+        assert body["restart"] == "applied"
 
     # ---- test connection
     @staticmethod

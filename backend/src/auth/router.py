@@ -16,7 +16,9 @@ from . import service
 from .dependencies import (
     ACCESS_COOKIE,
     REFRESH_COOKIE,
+    FailureLimiter,
     KeyedWindow,
+    client_ip,
     current_user,
     load_session_user,
     require_permission,
@@ -39,9 +41,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-_login_limit = KeyedWindow(8, 300)
+#: Five wrong guesses per 15 minutes, per address and per caller. Correct sign-ins cost nothing.
+_login_limit = FailureLimiter(5, 900)
 _otp_request_limit = KeyedWindow(3, 300)
-_otp_verify_limit = KeyedWindow(10, 300)
+_otp_verify_limit = FailureLimiter(5, 900)
 _password_limit = KeyedWindow(5, 300)
 
 _BAD_LOGIN = "That email and password do not match."
@@ -88,22 +91,28 @@ async def _open_session(
 @router.post("/login", response_model=SessionResponse, summary="Sign in with a password")
 async def login(
     payload: LoginRequest,
+    request: Request,
     response: Response,
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> SessionResponse:
     email = str(payload.email).lower()
-    _login_limit.check(email)
+    by_email, by_ip = f"email:{email}", f"ip:{client_ip(request, settings)}"
+    _login_limit.check(by_email, by_ip)
     user = await service.get_by_email(session, email)
     # Verified even with no account, so the answer takes the same time either way.
     password_ok = verify_password(payload.password, user.password_hash if user else None)
     if user is None or not password_ok or not user.is_active:
+        _login_limit.record_failure(by_email, by_ip)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail=_BAD_LOGIN)
     if payload.subdomain:
         slug = await service.client_slug_for(session, user)
         if not _owner_of_subdomain(user, slug, payload.subdomain):
+            _login_limit.record_failure(by_email, by_ip)
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail=_BAD_LOGIN)
-    _login_limit.reset(email)
+    # Only the address is cleared: signing in to your own account must not wipe the
+    # caller's record of guesses against other people's.
+    _login_limit.reset(by_email)
     return await _open_session(session, settings, user, response)
 
 
@@ -142,6 +151,7 @@ async def _send_code(
 async def _check_code(
     payload: MagicOtpRequest,
     code: str,
+    request: Request,
     response: Response,
     session: AsyncSession,
     settings: Settings,
@@ -150,12 +160,14 @@ async def _check_code(
     user, _ = await service.find_by_identifier(session, payload.identifier)
     slug = await service.client_slug_for(session, user) if user else None
     usable = user is not None and user.is_active and _owner_of_subdomain(user, slug, payload.subdomain)
-    _otp_verify_limit.check(key)
+    by_identifier, by_ip = f"identifier:{key}", f"ip:{client_ip(request, settings)}"
+    _otp_verify_limit.check(by_identifier, by_ip)
     if not usable or not await service.consume_otp(session, settings, user, code):
+        _otp_verify_limit.record_failure(by_identifier, by_ip)
         # Kept: a wrong guess has to count even though this request fails.
         await session.commit()
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail=_BAD_CODE)
-    _otp_verify_limit.reset(key)
+    _otp_verify_limit.reset(by_identifier)
     return await _open_session(session, settings, user, response)
 
 
@@ -187,6 +199,7 @@ async def magic_otp_request(
 )
 async def magic_otp_verify(
     payload: MagicOtpRequest,
+    request: Request,
     response: Response,
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
@@ -194,7 +207,7 @@ async def magic_otp_verify(
     _require_otp_delivery(settings)
     if payload.code is None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="code is required.")
-    return await _check_code(payload, payload.code, response, session, settings)
+    return await _check_code(payload, payload.code, request, response, session, settings)
 
 
 @router.post(
@@ -204,6 +217,7 @@ async def magic_otp_verify(
 )
 async def magic_otp(
     payload: MagicOtpRequest,
+    request: Request,
     response: Response,
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
@@ -213,7 +227,7 @@ async def magic_otp(
     _require_otp_delivery(settings)
     if payload.code is None:
         return await _send_code(payload, session, settings)
-    return await _check_code(payload, payload.code, response, session, settings)
+    return await _check_code(payload, payload.code, request, response, session, settings)
 
 
 @router.post("/refresh", response_model=SessionResponse, summary="Renew a session")

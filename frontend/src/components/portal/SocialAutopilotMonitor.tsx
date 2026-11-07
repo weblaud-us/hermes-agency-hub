@@ -63,13 +63,19 @@ function resultMessage(result: GenerateNowResult): MessageKey {
   return result.post.publishMode === "live" ? "social.resultPublishedLive" : "social.resultPublishedSandbox";
 }
 
-/** The post's visual, fetched with the caller's own credentials so no image URL is ever public. */
+/**
+ * The post's visual. It is shown straight from its public address, the same one Instagram is
+ * given to fetch. If the browser cannot reach that address (a hub that is only reachable
+ * from the server, say) it falls back to fetching the image with the caller's own session.
+ */
 function PostImage({ client, post, className }: { client: PortalClient; post: SocialPost; className?: string }) {
   const { t } = useI18n();
   const [state, setState] = useState<{ id: string; src: string | null } | null>(null);
+  const [directFailed, setDirectFailed] = useState<string | null>(null);
+  const direct = post.imageUrl && directFailed !== post.id ? post.imageUrl : null;
 
   useEffect(() => {
-    if (!post.hasImage) return;
+    if (!post.hasImage || direct) return;
     let cancelled = false;
     let created: string | null = null;
     client.socialMedia(post.id).then((src) => {
@@ -84,16 +90,22 @@ function PostImage({ client, post, className }: { client: PortalClient; post: So
       cancelled = true;
       if (created) URL.revokeObjectURL(created);
     };
-  }, [client, post.id, post.hasImage]);
+  }, [client, post.id, post.hasImage, direct]);
 
-  const src = state?.id === post.id ? state.src : null;
-  const loading = post.hasImage && state?.id !== post.id;
+  const src = direct ?? (state?.id === post.id ? state.src : null);
+  const loading = post.hasImage && !direct && state?.id !== post.id;
 
   return (
     <div className={cn("relative aspect-square overflow-hidden rounded-2xl bg-obsidian", className)}>
       {src ? (
-        // eslint-disable-next-line @next/next/no-img-element -- a blob or data URL: next/image cannot optimise either
-        <img src={src} alt={t("social.imageAlt", { headline: post.headline })} className="size-full object-cover" />
+        // eslint-disable-next-line @next/next/no-img-element -- a public, already-sized PNG, a blob or a data URL: next/image cannot optimise the last two
+        <img
+          src={src}
+          alt={t("social.imageAlt", { headline: post.headline })}
+          loading="lazy"
+          onError={direct ? () => setDirectFailed(post.id) : undefined}
+          className="size-full object-cover"
+        />
       ) : (
         <div
           role={loading ? "status" : undefined}

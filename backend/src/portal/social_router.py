@@ -42,15 +42,22 @@ from .sanitize import scrub
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/portal/{subdomain}", tags=["portal"])
+#: No sign-in: Meta fetches the visual itself, so the address has to be public.
+public_router = APIRouter(prefix="/public", tags=["public"])
 
 #: Each generation can call a paid image model, so one business gets a steady trickle.
 _generate_limit = KeyedWindow(12, 3600)
 _IMAGE_NAME = re.compile(r"^[0-9a-f]{32}\.(png|svg)$")
+_SUBDOMAIN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 _HANDOFF_LABEL = {"sales-rep-inbox": "Sales Rep", "order-desk-ecommerce": "Order Desk"}
 _FAILED_FOR_OWNER = "This post could not be published. The Weblaud team can see why and is on it."
 
 
-def _post_read(post: SocialPost, replies: int) -> SocialPostRead:
+def _media_missing() -> PortalError:
+    return PortalError(status.HTTP_404_NOT_FOUND, "social_media_missing", "That image is not available.")
+
+
+def _post_read(post: SocialPost, replies: int, settings: Settings, slug: str) -> SocialPostRead:
     return SocialPostRead(
         id=post.id,
         status=post.status.value,
@@ -60,6 +67,7 @@ def _post_read(post: SocialPost, replies: int) -> SocialPostRead:
         hashtags=[scrub(tag) for tag in post.hashtags or []],
         platforms=list(post.platforms or []),
         has_image=bool(post.image_filename),
+        image_url=social_service.public_image_url(settings, slug, post.image_filename),
         visual_engine=post.visual_engine,
         publish_mode=post.publish_mode if post.publish_mode in {"live", "sandbox"} else None,
         permalink=post.permalink,
@@ -99,7 +107,7 @@ async def _view(
         brand_kit=BrandKit(**social_service.effective_brand_kit(client)),
         live_publishing=await social_service.live_publishing(settings, client),
         business_mode=client.business_mode.value,
-        posts=[_post_read(post, counts.get(post.id, 0)) for post in posts],
+        posts=[_post_read(post, counts.get(post.id, 0), settings, client.slug) for post in posts],
         comments=[_comment_read(comment) for comment in comments],
     )
 
@@ -198,7 +206,7 @@ async def generate_now(
     return GenerateNowResponse(
         outcome=result.outcome,  # type: ignore[arg-type]
         message=message,
-        post=_post_read(result.post, len(result.comments)),
+        post=_post_read(result.post, len(result.comments), settings, client.slug),
         comments=[_comment_read(comment) for comment in result.comments],
     )
 
@@ -226,6 +234,44 @@ async def media(
             "X-Content-Type-Options": "nosniff",
             "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
             "Cache-Control": "private, max-age=3600",
+        },
+    )
+
+
+@public_router.get(
+    "/media/{subdomain}/{filename}",
+    summary="A generated post visual, for Meta and for the portal to display",
+)
+async def public_media(
+    subdomain: str,
+    filename: str,
+    settings: Settings = Depends(get_settings),
+) -> FileResponse:
+    """Both parts are matched against a strict pattern before they touch the filesystem,
+    so there is no way to name a path outside one tenant's visuals folder.
+
+    The names are 128 random bits, written by the hub and never by the tenant's agent, so
+    an address is only known to whoever the hub or the owner gave it to.
+    """
+    if not _SUBDOMAIN.fullmatch(subdomain) or not _IMAGE_NAME.fullmatch(filename):
+        raise _media_missing()
+    folder = social_service.media_dir(settings, subdomain)
+    path = folder / filename
+    try:
+        inside = path.resolve().parent == folder.resolve()
+    except OSError:
+        inside = False
+    if not inside or path.is_symlink() or not path.is_file():
+        raise _media_missing()
+    return FileResponse(
+        path,
+        media_type="image/png" if filename.endswith(".png") else "image/svg+xml",
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+            # The portal and Meta's crawler are both other origins.
+            "Cross-Origin-Resource-Policy": "cross-origin",
+            "Cache-Control": "public, max-age=3600",
         },
     )
 

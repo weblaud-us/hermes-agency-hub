@@ -36,5 +36,6 @@ node_modules/
 # -------------------------------------------------------------------- ide
 .vscode/
 .idea/
+.claude/
 .DS_Store
 Thumbs.db

@@ -63,7 +63,7 @@ DEFAULT_PLANS: dict[str, PlanResources] = {
         # Weblaud's "Presence" package. Business-mode skills are added on top
         # by clients.skills.skills_for_client.
         skills=[
-            "lead-qualification",
+            "sales-rep-inbox",
             "ai-employee-orchestrator",
             "designer-brand-studio",
             "social-media-autopilot",
@@ -112,6 +112,9 @@ class Settings(BaseSettings):
     api_prefix: str = "/api/v1"
     admin_api_key: str = _DEFAULT_ADMIN_API_KEY
     hub_public_url: str = "http://localhost:8080"
+    #: Believe ``X-Forwarded-For`` for the caller's address. Only safe when every request
+    #: reaches the hub through the website, which is the one door that sets it.
+    trust_proxy_headers: bool = False
     cors_origins: EnvList = ["http://localhost:3000"]
 
     # ------------------------------------------------------------- database
@@ -292,14 +295,19 @@ class Settings(BaseSettings):
     meta_page_id: str = ""
     meta_ig_user_id: str = ""
     meta_live_tenant: str = ""
-    #: Public https base the visuals are served from, which Meta must be able to fetch.
+    #: Public https origin of the hub, which Meta must be able to reach to fetch a visual
+    #: from ``/api/v1/public/media``. Blank falls back to ``hub_public_url``.
     social_public_base_url: str = ""
     #: Optional. With it the visual generator asks an image model for the backdrop.
     openai_api_key: str = ""
 
     # ------------------------------------------------------------ messaging
     messaging_webhook_secret: str = ""
+    #: Answers Meta's ``hub.verify_token`` challenge unless the tenant saved its own.
     meta_verify_token: str = ""
+    #: The Meta app's secret, which signs every webhook delivery (``X-Hub-Signature-256``).
+    #: Blank means webhook deliveries are refused, never accepted unsigned.
+    meta_app_secret: str = ""
     twilio_auth_token: str = ""
     message_forward_timeout_seconds: float = 15.0
 

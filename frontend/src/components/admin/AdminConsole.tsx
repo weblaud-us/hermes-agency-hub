@@ -1,11 +1,10 @@
 "use client";
 
 import { AnimatePresence, motion } from "motion/react";
-import { AlertTriangle, BadgeCheck, Contact, LibraryBig, RotateCw, Server } from "lucide-react";
+import { AlertTriangle, BadgeCheck, LibraryBig, RotateCw, Server } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ClientOpsDrawer } from "@/components/admin/ClientOpsDrawer";
-import { ProspectCrm } from "@/components/admin/ProspectCrm";
 import { ProvisionModal, type ProvisionTab } from "@/components/admin/ProvisionModal";
 import { ShadowQaQueue } from "@/components/admin/ShadowQaQueue";
 import { StarterKitsManager } from "@/components/admin/StarterKitsManager";
@@ -29,12 +28,11 @@ import { SPRING } from "@/lib/motion";
 import { TIERS, type TierId } from "@/lib/provisioning";
 import { copyToClipboard } from "@/lib/utils";
 
-type AdminTab = "fleet" | "qa" | "crm" | "kits";
+type AdminTab = "fleet" | "qa" | "kits";
 
 const TABS: { value: AdminTab; label: string; icon: ReactNode; permission: string }[] = [
   { value: "fleet", label: "Fleet & Provisioning", icon: <Server aria-hidden className="size-3.5" />, permission: PERMISSIONS.clientsRead },
   { value: "qa", label: "Shadow-Week QA", icon: <BadgeCheck aria-hidden className="size-3.5" />, permission: PERMISSIONS.qa },
-  { value: "crm", label: "Prospect CRM", icon: <Contact aria-hidden className="size-3.5" />, permission: PERMISSIONS.crm },
   { value: "kits", label: "Starter Kits & Skills", icon: <LibraryBig aria-hidden className="size-3.5" />, permission: PERMISSIONS.skillsRead },
 ];
 
@@ -303,7 +301,6 @@ function ConsoleBody() {
         />
       )}
       {tab === "qa" && ready && <ShadowQaQueue ops={ready.ops} />}
-      {tab === "crm" && ready && <ProspectCrm ops={ready.ops} permissions={permissions} />}
       {tab === "kits" && ready && <StarterKitsManager ops={ready.ops} permissions={permissions} />}
 
       {hub && ready && permissions.includes(PERMISSIONS.provision) && (

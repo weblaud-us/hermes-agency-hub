@@ -112,6 +112,12 @@ services:
       META_IG_USER_ID: ${META_IG_USER_ID:-}
       META_LIVE_TENANT: ${META_LIVE_TENANT:-}
       SOCIAL_PUBLIC_BASE_URL: ${SOCIAL_PUBLIC_BASE_URL:-}
+      # Meta webhooks: the app secret signs every delivery; deliveries are refused without it.
+      META_APP_SECRET: ${META_APP_SECRET:-}
+      META_VERIFY_TOKEN: ${META_VERIFY_TOKEN:-}
+      # The website is the only door to the hub and passes the visitor's address on, which
+      # the sign-in rate limit needs. Set false if the hub is exposed to the internet directly.
+      TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-true}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-hermes}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-hermes_hub}
       BASE_DOMAIN: ${BASE_DOMAIN:-localhost}

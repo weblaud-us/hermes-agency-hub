@@ -6,21 +6,23 @@ import type {
   PortalApproval,
   PortalClient,
   RoiReport,
+  RecordChanges,
+  RecordInput,
+  WorkRecord,
   WorkspaceRecord,
 } from "./portal-api";
 import { delay } from "./utils";
 
 type GrowthViews = Pick<
   PortalClient,
-  "profile" | "roi" | "approvals" | "decideApproval" | "guardrails" | "setGuardrail" | "workspace"
+  "profile" | "roi" | "approvals" | "decideApproval" | "guardrails" | "setGuardrail" | "workspace" | "records" | "createRecord" | "updateRecord"
 >;
 
 /** Sample figures for a preview with no hub behind it. The page labels them as samples. */
 export function createGrowthMock(company: string, subdomain: string): GrowthViews {
   const ecommerce = !/dental|clinic|salon|beauty|restaurant|travel/.test(subdomain);
-  const bd = /suvana|dhaka|bd/.test(subdomain) || subdomain === "suvana";
-  const currency = bd ? "BDT" : "USD";
-  const scale = bd ? 1 : 0.01;
+  const currency = "USD";
+  const scale = 0.01;
   const now = new Date();
   const period = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 
@@ -49,7 +51,7 @@ export function createGrowthMock(company: string, subdomain: string): GrowthView
     }),
     ecommerce
       ? item("a3", "courier_dispatch", "Dispatch 12 confirmed COD parcels", "All twelve customers confirmed this morning.", {
-          courier: bd ? "Steadfast" : "DHL",
+          courier: "DHL",
           parcels: 12,
           cod_total: 18450 * scale,
         })
@@ -100,13 +102,45 @@ export function createGrowthMock(company: string, subdomain: string): GrowthView
     updatedAt: now.toISOString(),
   });
 
+  const hoursAgo = (hours: number) => new Date(now.getTime() - hours * 3_600_000).toISOString();
+  const sample = (fields: Partial<WorkRecord> & Pick<WorkRecord, "id" | "ref" | "kind" | "status" | "customerName">, hours: number): WorkRecord => ({
+    contact: "",
+    source: "manual",
+    message: "",
+    serviceRequested: "",
+    preferredDate: "",
+    qualification: "warm",
+    items: "",
+    totalUsd: 0,
+    codStatus: "pending",
+    courier: "",
+    trackingNumber: "",
+    dispatchedAt: null,
+    createdAt: hoursAgo(hours),
+    updatedAt: hoursAgo(hours),
+    ...fields,
+  });
+  let sheet: WorkRecord[] = ecommerce
+    ? [
+        sample({ id: "mock-order-0001", ref: "ORD-4F2A9C", kind: "order", status: "pending", customerName: "R. Hall", contact: "+1 555 010 0142", items: "Navy shirt, size M x1", totalUsd: 38, codStatus: "pending" }, 2),
+        sample({ id: "mock-order-0002", ref: "ORD-71B3E0", kind: "order", status: "dispatched", customerName: "N. Adams", contact: "+1 555 010 0177", items: "Linen dress, olive, size S x1", totalUsd: 64.5, codStatus: "pending", courier: "DHL", trackingNumber: "DH-20418837", dispatchedAt: hoursAgo(20) }, 30),
+        sample({ id: "mock-order-0003", ref: "ORD-C90D12", kind: "order", status: "delivered", customerName: "T. Reed", contact: "@treed", items: "Kids set x2", totalUsd: 52, codStatus: "collected", courier: "FedEx", trackingNumber: "FX-77120" }, 70),
+        sample({ id: "mock-lead-0001", ref: "LEAD-0A11B2", kind: "lead", status: "new", customerName: "Imani C.", contact: "instagram:1790", source: "instagram_comment", message: "Do you still have the navy one in medium?", qualification: "hot" }, 1),
+      ]
+    : [
+        sample({ id: "mock-lead-0001", ref: "LEAD-5C21D8", kind: "lead", status: "booked", customerName: "S. Ahmed", contact: "+1 555 010 0199", serviceRequested: "Scaling and polish", preferredDate: "Next Tuesday", qualification: "hot", source: "whatsapp" }, 26),
+        sample({ id: "mock-lead-0002", ref: "LEAD-8E02F4", kind: "lead", status: "new", customerName: "M. Islam", contact: "+1 555 010 0123", serviceRequested: "Braces consultation", preferredDate: "This week", qualification: "hot", source: "facebook_comment", message: "How much are braces and can I book for Friday?" }, 3),
+        sample({ id: "mock-lead-0003", ref: "LEAD-19AB77", kind: "lead", status: "new", customerName: "A. Noor", contact: "messenger:4410", serviceRequested: "Whitening", qualification: "warm", source: "messenger" }, 8),
+        sample({ id: "mock-lead-0004", ref: "LEAD-D43C05", kind: "lead", status: "completed", customerName: "F. Karim", contact: "+1 555 010 0150", serviceRequested: "Consultation", preferredDate: "Last Monday", qualification: "warm" }, 90),
+      ];
+
   const records: WorkspaceRecord[] = ecommerce
     ? [
-        record("w1", "order", "Order #4821, navy panjabi (M)", "awaiting_cod_confirmation", { customer: "R. Hasan", cod_amount: 1650 * scale, courier: "Pathao" }),
-        record("w2", "order", "Order #4817, cotton saree", "in_transit", { customer: "N. Akter", cod_amount: 2450 * scale, courier: "Steadfast", tracking: "SF-20418837" }),
-        record("w3", "order", "Order #4809, kids kurta set", "delivered", { customer: "T. Rahman", cod_amount: 980 * scale, courier: "RedX", tracking: "RX-77120" }),
-        record("w4", "stock_alert", "Navy panjabi, size L", "low", { sku: "PNJ-NAVY-L", stock: 3, reorder_at: 10 }),
-        record("w5", "stock_alert", "Cotton saree, olive", "low", { sku: "SAR-OLV", stock: 1, reorder_at: 5 }),
+        record("w1", "order", "Order #4821, navy shirt (M)", "awaiting_cod_confirmation", { customer: "R. Hall", cod_amount: 1650 * scale, courier: "UPS" }),
+        record("w2", "order", "Order #4817, linen dress", "in_transit", { customer: "N. Adams", cod_amount: 2450 * scale, courier: "DHL", tracking: "DH-20418837" }),
+        record("w3", "order", "Order #4809, kids set", "delivered", { customer: "T. Reed", cod_amount: 980 * scale, courier: "FedEx", tracking: "FX-77120" }),
+        record("w4", "stock_alert", "Navy shirt, size L", "low", { sku: "SHT-NAVY-L", stock: 3, reorder_at: 10 }),
+        record("w5", "stock_alert", "Linen dress, olive", "low", { sku: "DRS-OLV", stock: 1, reorder_at: 5 }),
       ]
     : [
         record("w1", "appointment", "Scaling and polish, S. Ahmed", "confirmed", { contact: "S. Ahmed", service: "Scaling" }),
@@ -151,7 +185,7 @@ export function createGrowthMock(company: string, subdomain: string): GrowthView
         businessMode: ecommerce ? "ecommerce" : "general",
         nicheTemplate: ecommerce ? "ecommerce_store" : "dental_clinic",
         packageTier: "growth",
-        region: bd ? "bd" : "global",
+        region: "global",
         currency,
         onboardingStage: 7,
         pendingApprovals: approvals.filter((row) => row.status === "pending_owner").length,
@@ -191,6 +225,54 @@ export function createGrowthMock(company: string, subdomain: string): GrowthView
       await delay(180);
       guardrails = guardrails.map((row) => (row.key === key && row.promotable ? { ...row, lane: target } : row));
       return guardrails.map((row) => ({ ...row }));
+    },
+
+    async records(kind) {
+      await delay(160);
+      return sheet.filter((row) => !kind || row.kind === kind).map((row) => ({ ...row }));
+    },
+
+    async createRecord(input: RecordInput) {
+      await delay(160);
+      const stamp = new Date().toISOString();
+      const row: WorkRecord = {
+        id: `mock-record-${sheet.length + 1}-${Date.now()}`.slice(0, 16),
+        ref: `${input.kind === "order" ? "ORD" : "LEAD"}-${String(Math.floor(Math.random() * 0xffffff)).padStart(6, "0").toUpperCase()}`,
+        kind: input.kind,
+        status: input.status ?? (input.kind === "order" ? "pending" : "new"),
+        customerName: input.customerName,
+        contact: input.contact ?? "",
+        source: input.source ?? "manual",
+        message: input.message ?? "",
+        serviceRequested: input.serviceRequested ?? "",
+        preferredDate: input.preferredDate ?? "",
+        qualification: input.qualification ?? "warm",
+        items: input.items ?? "",
+        totalUsd: input.totalUsd ?? 0,
+        codStatus: input.codStatus ?? "pending",
+        courier: input.courier ?? "",
+        trackingNumber: input.trackingNumber ?? "",
+        dispatchedAt: null,
+        createdAt: stamp,
+        updatedAt: stamp,
+      };
+      sheet = [row, ...sheet];
+      return { ...row };
+    },
+
+    async updateRecord(id: string, changes: RecordChanges) {
+      await delay(160);
+      const current = sheet.find((row) => row.id === id);
+      if (!current) throw new ApiError(404, "record_not_found", "That record no longer exists.");
+      const stamp = new Date().toISOString();
+      const next: WorkRecord = {
+        ...current,
+        ...changes,
+        updatedAt: stamp,
+        dispatchedAt: changes.status === "dispatched" && current.status !== "dispatched" ? stamp : current.dispatchedAt,
+      };
+      sheet = sheet.map((row) => (row.id === id ? next : row));
+      return { ...next };
     },
 
     async workspace() {

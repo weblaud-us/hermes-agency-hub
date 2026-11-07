@@ -45,7 +45,7 @@ function num(value: unknown): number | null {
 }
 
 function Preview({ item, currency }: { item: PortalApproval; currency: string }) {
-  const { t, money, number, locale } = useI18n();
+  const { t, money, number } = useI18n();
   const { preview } = item;
   const body = typeof preview.body === "string" ? preview.body : null;
   const amount = num(preview.amount);
@@ -61,7 +61,7 @@ function Preview({ item, currency }: { item: PortalApproval; currency: string })
         <p className="font-medium">
           {t("approvals.previewAmount", {
             amount: money(amount, currency),
-            per: locale === "bn" ? "দিন" : typeof preview.per === "string" ? preview.per : "day",
+            per: typeof preview.per === "string" ? preview.per : "day",
             days: number(num(preview.duration_days) ?? 1),
           })}
         </p>

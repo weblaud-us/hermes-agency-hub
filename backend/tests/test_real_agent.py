@@ -112,7 +112,7 @@ def test_a_new_tenant_comes_up_and_stays_up(
 ):
     assert tenant["status"] == "active", f"{tenant['warning']}\n{_logs(container)}"
     assert tenant["warning"] is None
-    assert "lead-qualification" in tenant["synced_skills"]
+    assert "sales-rep-inbox" in tenant["synced_skills"]
 
     time.sleep(SETTLE_SECONDS)
 
@@ -172,6 +172,6 @@ def test_a_new_tenant_comes_up_and_stays_up(
     assert routed.status_code == 200
     assert routed.headers["X-Hermes-Tenant"] == SLUG
     assert vault.status_code == 200
-    assert "lead-qualification" in [
+    assert "sales-rep-inbox" in [
         skill["id"] for skill in vault.json()["agency_verified_skills"]
     ]

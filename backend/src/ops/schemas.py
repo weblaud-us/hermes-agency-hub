@@ -327,6 +327,8 @@ class SocialPostRead(BaseModel):
     hashtags: list[str]
     platforms: list[str]
     has_image: bool
+    #: The public https address of the visual, which is also what Meta is given to fetch.
+    image_url: str | None = None
     visual_engine: str | None
     #: ``live`` reached Meta, ``sandbox`` is a recorded dry run, null if never published.
     publish_mode: Literal["live", "sandbox"] | None

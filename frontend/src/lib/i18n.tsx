@@ -1,44 +1,10 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useSyncExternalStore, type ReactNode } from "react";
-import { bn, en, type MessageKey } from "./i18n-messages";
+import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { en, type MessageKey } from "./i18n-messages";
 import { formatCountdown, formatDuration } from "./portal-format";
 
-export type Locale = "en" | "bn";
-
-const STORAGE_KEY = "portal.locale";
-const listeners = new Set<() => void>();
-/** Used when storage is blocked, so the toggle still works for this page's lifetime. */
-let memoryLocale: Locale = "en";
-
-function readLocale(): Locale {
-  try {
-    return localStorage.getItem(STORAGE_KEY) === "bn" ? "bn" : "en";
-  } catch {
-    return memoryLocale;
-  }
-}
-
-function writeLocale(next: Locale): void {
-  memoryLocale = next;
-  try {
-    localStorage.setItem(STORAGE_KEY, next);
-  } catch {
-    // Storage blocked: memoryLocale carries it.
-  }
-  listeners.forEach((listener) => listener());
-}
-
-function subscribe(listener: () => void) {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
-}
-
 export interface I18n {
-  locale: Locale;
-  setLocale: (next: Locale) => void;
   t: (key: MessageKey, vars?: Record<string, string | number>) => string;
   number: (value: number, fractionDigits?: number) => string;
   percent: (value: number) => string;
@@ -51,32 +17,23 @@ export interface I18n {
   countdown: (ms: number) => string;
 }
 
-const BANGLA_DIGITS = "০১২৩৪৫৬৭৮৯";
-
-function build(locale: Locale): I18n {
-  const messages = locale === "bn" ? bn : en;
-  const numberLocale = locale === "bn" ? "bn-BD" : "en-US";
-  const digits = (text: string) => (locale === "bn" ? text.replace(/\d/g, (digit) => BANGLA_DIGITS[Number(digit)]) : text);
+function build(): I18n {
   const t: I18n["t"] = (key, vars) => {
-    let text: string = messages[key] ?? en[key];
+    let text: string = en[key];
     for (const [name, value] of Object.entries(vars ?? {})) text = text.replaceAll(`{${name}}`, String(value));
     return text;
   };
 
   return {
-    locale,
-    setLocale: writeLocale,
     t,
     number(value, fractionDigits = 0) {
-      return new Intl.NumberFormat(numberLocale, { maximumFractionDigits: fractionDigits }).format(value);
+      return new Intl.NumberFormat("en-US", { maximumFractionDigits: fractionDigits }).format(value);
     },
     percent(value) {
-      return `${new Intl.NumberFormat(numberLocale, { maximumFractionDigits: 2 }).format(value)}%`;
+      return `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value)}%`;
     },
     money(value, currency) {
-      // Bangladeshi readers group in lakhs and crores, in either language.
-      const moneyLocale = locale === "bn" ? "bn-BD" : currency === "BDT" ? "en-IN" : "en-US";
-      return new Intl.NumberFormat(moneyLocale, {
+      return new Intl.NumberFormat("en-US", {
         style: "currency",
         currency,
         currencyDisplay: "narrowSymbol",
@@ -86,16 +43,16 @@ function build(locale: Locale): I18n {
       }).format(value);
     },
     date(iso) {
-      return new Intl.DateTimeFormat(locale === "bn" ? "bn-BD" : "en-GB", { day: "numeric", month: "short" }).format(new Date(iso));
+      return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" }).format(new Date(iso));
     },
     month(period) {
       const [year, month] = period.split("-").map(Number);
-      return new Intl.DateTimeFormat(locale === "bn" ? "bn-BD" : "en-GB", { month: "long", year: "numeric", timeZone: "UTC" }).format(
+      return new Intl.DateTimeFormat("en-GB", { month: "long", year: "numeric", timeZone: "UTC" }).format(
         new Date(Date.UTC(year, month - 1, 1)),
       );
     },
     dateTime(iso) {
-      return new Intl.DateTimeFormat(locale === "bn" ? "bn-BD" : "en-US", {
+      return new Intl.DateTimeFormat("en-US", {
         month: "short",
         day: "numeric",
         hour: "numeric",
@@ -107,66 +64,28 @@ function build(locale: Locale): I18n {
       const seconds = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
       if (seconds < 60) return t("time.justNow");
       const minutes = Math.round(seconds / 60);
-      if (minutes < 60) return t("time.minutes", { count: digits(String(minutes)) });
+      if (minutes < 60) return t("time.minutes", { count: minutes });
       const hours = Math.round(minutes / 60);
-      if (hours < 24) return t("time.hours", { count: digits(String(hours)) });
-      return t("time.days", { count: digits(String(Math.round(hours / 24))) });
+      if (hours < 24) return t("time.hours", { count: hours });
+      return t("time.days", { count: Math.round(hours / 24) });
     },
     duration(ms) {
-      const text = formatDuration(ms);
-      return text === null ? null : digits(text);
+      return formatDuration(ms);
     },
     countdown(ms) {
-      return ms <= 0 ? t("time.dueNow") : digits(formatCountdown(ms));
+      return ms <= 0 ? t("time.dueNow") : formatCountdown(ms);
     },
   };
 }
 
-const I18nContext = createContext<I18n>(build("en"));
+const I18nContext = createContext<I18n>(build());
 
 export function useI18n(): I18n {
   return useContext(I18nContext);
 }
 
+/** The interface is English only. The provider stays so every page keeps one place to read formatting from. */
 export function LocaleProvider({ children }: { children: ReactNode }) {
-  // The server cannot see the stored choice, so it renders English and the client
-  // switches right after hydration.
-  const locale = useSyncExternalStore(subscribe, readLocale, () => "en" as Locale);
-  const value = useMemo(() => build(locale), [locale]);
-
-  useEffect(() => {
-    document.documentElement.lang = locale;
-    return () => {
-      document.documentElement.lang = "en";
-    };
-  }, [locale]);
-
+  const value = useMemo(() => build(), []);
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
-}
-
-/** Each option is written in its own language, so it can be found by someone who cannot read the other. */
-export function LanguageToggle({ className }: { className?: string }) {
-  const { locale, setLocale, t } = useI18n();
-  return (
-    <div
-      role="group"
-      aria-label={t("common.language")}
-      className={`inline-flex rounded-lg border border-white/10 bg-white/3 p-0.5 text-xs font-medium ${className ?? ""}`}
-    >
-      {(["en", "bn"] as const).map((option) => (
-        <button
-          key={option}
-          type="button"
-          lang={option}
-          aria-pressed={locale === option}
-          onClick={() => setLocale(option)}
-          className={`inline-flex min-h-9 min-w-10 items-center justify-center rounded-md px-2.5 transition-colors ${
-            locale === option ? "bg-white/12 text-ink" : "text-ink-3 hover:text-ink-2"
-          }`}
-        >
-          {option === "en" ? "EN" : "বাংলা"}
-        </button>
-      ))}
-    </div>
-  );
 }

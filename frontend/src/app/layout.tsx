@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { JetBrains_Mono, Noto_Sans_Bengali, Plus_Jakarta_Sans } from "next/font/google";
+import { JetBrains_Mono, Plus_Jakarta_Sans } from "next/font/google";
 import type { ReactNode } from "react";
 import { MotionProvider } from "@/components/providers/MotionProvider";
 import { BRAND, TAGLINE } from "@/lib/provisioning";
@@ -15,14 +15,6 @@ const jetbrains = JetBrains_Mono({
   subsets: ["latin"],
   variable: "--font-jetbrains",
   display: "swap",
-});
-
-/** Covers Bangla only, and is fetched only once Bangla text is on the page. */
-const bengali = Noto_Sans_Bengali({
-  subsets: ["bengali"],
-  variable: "--font-bengali",
-  display: "swap",
-  preload: false,
 });
 
 export const metadata: Metadata = {
@@ -41,7 +33,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" data-scroll-behavior="smooth" className={`${jakarta.variable} ${jetbrains.variable} ${bengali.variable}`}>
+    <html lang="en" data-scroll-behavior="smooth" className={`${jakarta.variable} ${jetbrains.variable}`}>
       {/* Browser extensions add attributes to <body> before React hydrates. */}
       <body suppressHydrationWarning>
         <noscript>
