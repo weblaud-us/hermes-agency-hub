@@ -29,6 +29,15 @@ def unauthorized() -> PortalError:
     )
 
 
+def forbidden() -> PortalError:
+    """A signed-in user asking for a business that is not theirs to see."""
+    return PortalError(
+        status.HTTP_403_FORBIDDEN,
+        "portal_forbidden",
+        "This account does not have access to that business.",
+    )
+
+
 def data_unavailable() -> PortalError:
     return PortalError(
         status.HTTP_503_SERVICE_UNAVAILABLE,

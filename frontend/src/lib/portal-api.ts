@@ -1,7 +1,10 @@
+import { discardBody, refreshSession } from "./auth";
 import { ApiError } from "./hub-types";
+import { createLiveKnowledge, type KnowledgeClient, type UsageSummary } from "./knowledge-api";
 import { createMockPortal } from "./portal-mock";
 
 export { ApiError };
+export type { UsageSummary };
 
 const BASE = "/portal-api";
 const TOKEN_PREFIX = "coordinator.portal.";
@@ -152,8 +155,215 @@ export interface ChatReply {
   durationMs: number;
 }
 
+// ------------------------------------------------------------------ growth views
+export type BusinessMode = "general" | "ecommerce";
+export type ApprovalKind =
+  | "social_post"
+  | "reel"
+  | "ad_boost"
+  | "partner_email"
+  | "website_update"
+  | "courier_dispatch"
+  | "discount_offer";
+export type ApprovalStatus =
+  | "qa_review"
+  | "qa_returned"
+  | "pending_owner"
+  | "approved"
+  | "changes_requested"
+  | "rejected";
+export type OwnerDecision = "approve" | "edit" | "reject";
+export type GuardrailLane = "automatic" | "owner" | "never";
+export type WorkspaceKind = "appointment" | "lead" | "follow_up" | "order" | "stock_alert";
+
+export interface PortalProfile {
+  companyName: string;
+  businessMode: BusinessMode;
+  nicheTemplate: string;
+  packageTier: string;
+  region: "bd" | "global";
+  currency: string;
+  onboardingStage: number;
+  pendingApprovals: number;
+  isDemo: boolean;
+}
+
+export interface RoiBaseline {
+  monthlyInquiries: number;
+  conversionRate: number;
+  avgOrderOrProfitValue: number;
+  monthlyRetainerInvestment: number;
+}
+
+export interface RoiFunnel {
+  totalInquiries: number;
+  qualifiedLeads: number;
+  confirmedOutcomes: number;
+  conversionRate: number | null;
+}
+
+export interface RoiResult {
+  baselineOutcomes: number;
+  currentOutcomes: number;
+  valuePerOutcome: number;
+  baselineGrossProfit: number;
+  currentGrossProfit: number;
+  incrementalGrossProfit: number;
+  retainer: number;
+  adSpend: number;
+  totalInvestment: number;
+  netValue: number;
+  roiPercent: number | null;
+}
+
+export interface RoiReport {
+  period: string;
+  currency: string;
+  businessMode: BusinessMode;
+  baseline: RoiBaseline | null;
+  funnel: RoiFunnel | null;
+  result: RoiResult | null;
+  availablePeriods: string[];
+}
+
+export interface PortalApproval {
+  id: string;
+  kind: ApprovalKind;
+  status: ApprovalStatus;
+  title: string;
+  summary: string;
+  preview: Record<string, unknown>;
+  note: string | null;
+  decidedAt: string | null;
+  createdAt: string | null;
+  decidedAutomatically: boolean;
+}
+
+export interface GuardrailItem {
+  key: string;
+  label: string;
+  lane: GuardrailLane;
+  defaultLane: GuardrailLane;
+  promotable: boolean;
+}
+
+export interface WorkspaceRecord {
+  id: string;
+  kind: WorkspaceKind;
+  title: string;
+  status: string;
+  detail: Record<string, unknown>;
+  dueAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface WorkspaceView {
+  businessMode: BusinessMode;
+  records: WorkspaceRecord[];
+}
+
+export interface BrandKit {
+  primaryColor: string;
+  accentColor: string;
+  logoText: string;
+  contactCta: string;
+  websiteUrl: string | null;
+}
+
+export type SocialPostStatus = "awaiting_approval" | "published" | "failed" | "rejected";
+export type SocialOutcome = "published" | "awaiting_owner" | "in_qa_review" | "failed";
+
+export interface SocialPost {
+  id: string;
+  status: SocialPostStatus;
+  headline: string;
+  subtext: string;
+  caption: string;
+  hashtags: string[];
+  platforms: string[];
+  hasImage: boolean;
+  visualEngine: string | null;
+  /** `sandbox` is a recorded dry run: nothing reached Meta. */
+  publishMode: "live" | "sandbox" | null;
+  permalink: string | null;
+  /** Null when unknown. Never a guess. */
+  reach: number | null;
+  commentsReplied: number;
+  leadsCaptured: number;
+  error: string | null;
+  /** A sample row from the demo account. */
+  demo: boolean;
+  publishedAt: string | null;
+  createdAt: string;
+}
+
+export interface SocialComment {
+  id: string;
+  postId: string;
+  author: string;
+  text: string;
+  publicReply: string;
+  /** Who took the conversation over, e.g. "Sales Rep" or "Order Desk". */
+  handoffTo: string | null;
+  dmText: string;
+  live: boolean;
+  /** An example of what the autopilot does with a comment, not a real customer. */
+  sample: boolean;
+  createdAt: string;
+}
+
+export interface SocialAutopilot {
+  autopilotSocial: boolean;
+  brandKit: BrandKit;
+  /** False means sandbox mode: nothing is sent to Meta. */
+  livePublishing: boolean;
+  businessMode: BusinessMode;
+  posts: SocialPost[];
+  comments: SocialComment[];
+}
+
+export interface GenerateNowResult {
+  outcome: SocialOutcome;
+  message: string;
+  post: SocialPost;
+  comments: SocialComment[];
+}
+
+export interface SocialSettingsPatch {
+  autopilotSocial?: boolean;
+  brandKit?: BrandKit;
+}
+
+export interface RosterAgent {
+  key: string;
+  name: string;
+  role: string;
+  ecommerceOnly: boolean;
+  active: boolean;
+}
+
+export interface Roster {
+  businessMode: BusinessMode;
+  rosters: Record<BusinessMode, RosterAgent[]>;
+}
+
 export interface PortalClient {
   readonly mode: "live" | "mock";
+  /** Business setup, catalog, channel credentials and AI usage. */
+  readonly knowledge: KnowledgeClient;
+  profile(): Promise<PortalProfile>;
+  roi(period?: string): Promise<RoiReport>;
+  approvals(): Promise<PortalApproval[]>;
+  decideApproval(id: string, decision: OwnerDecision, note?: string): Promise<PortalApproval>;
+  guardrails(): Promise<GuardrailItem[]>;
+  setGuardrail(key: string, lane: "automatic" | "owner"): Promise<GuardrailItem[]>;
+  workspace(): Promise<WorkspaceView>;
+  roster(): Promise<Roster>;
+  socialAutopilot(): Promise<SocialAutopilot>;
+  updateSocialSettings(patch: SocialSettingsPatch): Promise<SocialAutopilot>;
+  generateNow(): Promise<GenerateNowResult>;
+  /** An object URL for the post's visual, or null when it has none. Revoke it when done. */
+  socialMedia(postId: string): Promise<string | null>;
   overview(): Promise<PortalOverview>;
   channels(): Promise<PortalChannel[]>;
   reconnectChannel(channel: ChannelName): Promise<ReconnectResult>;
@@ -297,6 +507,216 @@ const toOverview = (wire: OverviewWire): PortalOverview => ({
   scheduledBriefings: wire.scheduled_briefings,
 });
 
+interface RoiWire {
+  period: string;
+  currency: string;
+  business_mode: BusinessMode;
+  baseline: {
+    monthly_inquiries: number;
+    conversion_rate: number;
+    avg_order_or_profit_value: number;
+    monthly_retainer_investment: number;
+  } | null;
+  funnel: {
+    total_inquiries: number;
+    qualified_leads: number;
+    confirmed_outcomes: number;
+    conversion_rate: number | null;
+  } | null;
+  result: {
+    baseline_outcomes: number;
+    current_outcomes: number;
+    value_per_outcome: number;
+    baseline_gross_profit: number;
+    current_gross_profit: number;
+    incremental_gross_profit: number;
+    retainer: number;
+    ad_spend: number;
+    total_investment: number;
+    net_value: number;
+    roi_percent: number | null;
+  } | null;
+  available_periods: string[];
+}
+
+interface ApprovalWire {
+  id: string;
+  kind: ApprovalKind;
+  status: ApprovalStatus;
+  title: string;
+  summary: string;
+  preview: Record<string, unknown>;
+  note: string | null;
+  decided_at: string | null;
+  created_at: string | null;
+  decided_automatically: boolean;
+}
+
+interface GuardrailWire {
+  key: string;
+  label: string;
+  lane: GuardrailLane;
+  default_lane: GuardrailLane;
+  promotable: boolean;
+}
+
+export const toRoi = (wire: RoiWire): RoiReport => ({
+  period: wire.period,
+  currency: wire.currency,
+  businessMode: wire.business_mode,
+  baseline: wire.baseline && {
+    monthlyInquiries: wire.baseline.monthly_inquiries,
+    conversionRate: wire.baseline.conversion_rate,
+    avgOrderOrProfitValue: wire.baseline.avg_order_or_profit_value,
+    monthlyRetainerInvestment: wire.baseline.monthly_retainer_investment,
+  },
+  funnel: wire.funnel && {
+    totalInquiries: wire.funnel.total_inquiries,
+    qualifiedLeads: wire.funnel.qualified_leads,
+    confirmedOutcomes: wire.funnel.confirmed_outcomes,
+    conversionRate: wire.funnel.conversion_rate,
+  },
+  result: wire.result && {
+    baselineOutcomes: wire.result.baseline_outcomes,
+    currentOutcomes: wire.result.current_outcomes,
+    valuePerOutcome: wire.result.value_per_outcome,
+    baselineGrossProfit: wire.result.baseline_gross_profit,
+    currentGrossProfit: wire.result.current_gross_profit,
+    incrementalGrossProfit: wire.result.incremental_gross_profit,
+    retainer: wire.result.retainer,
+    adSpend: wire.result.ad_spend,
+    totalInvestment: wire.result.total_investment,
+    netValue: wire.result.net_value,
+    roiPercent: wire.result.roi_percent,
+  },
+  availablePeriods: wire.available_periods,
+});
+
+export type { RoiWire };
+
+const toApproval = (wire: ApprovalWire): PortalApproval => ({
+  id: wire.id,
+  kind: wire.kind,
+  status: wire.status,
+  title: wire.title,
+  summary: wire.summary,
+  preview: wire.preview,
+  note: wire.note,
+  decidedAt: wire.decided_at,
+  createdAt: wire.created_at,
+  decidedAutomatically: wire.decided_automatically,
+});
+
+interface BrandKitWire {
+  primary_color: string;
+  accent_color: string;
+  logo_text: string;
+  contact_cta: string;
+  website_url: string | null;
+}
+
+interface SocialPostWire {
+  id: string;
+  status: SocialPostStatus;
+  headline: string;
+  subtext: string;
+  caption: string;
+  hashtags: string[];
+  platforms: string[];
+  has_image: boolean;
+  visual_engine: string | null;
+  publish_mode: "live" | "sandbox" | null;
+  permalink: string | null;
+  reach: number | null;
+  comments_replied: number;
+  leads_captured: number;
+  error: string | null;
+  demo: boolean;
+  published_at: string | null;
+  created_at: string;
+}
+
+interface SocialCommentWire {
+  id: string;
+  post_id: string;
+  author: string;
+  text: string;
+  public_reply: string;
+  handoff_to: string | null;
+  dm_text: string;
+  live: boolean;
+  sample: boolean;
+  created_at: string;
+}
+
+interface SocialWire {
+  autopilot_social: boolean;
+  brand_kit: BrandKitWire;
+  live_publishing: boolean;
+  business_mode: BusinessMode;
+  posts: SocialPostWire[];
+  comments: SocialCommentWire[];
+}
+
+const toBrandKit = (wire: BrandKitWire): BrandKit => ({
+  primaryColor: wire.primary_color,
+  accentColor: wire.accent_color,
+  logoText: wire.logo_text,
+  contactCta: wire.contact_cta,
+  websiteUrl: wire.website_url,
+});
+
+const toSocialPost = (wire: SocialPostWire): SocialPost => ({
+  id: wire.id,
+  status: wire.status,
+  headline: wire.headline,
+  subtext: wire.subtext,
+  caption: wire.caption,
+  hashtags: wire.hashtags,
+  platforms: wire.platforms,
+  hasImage: wire.has_image,
+  visualEngine: wire.visual_engine,
+  publishMode: wire.publish_mode,
+  permalink: wire.permalink,
+  reach: wire.reach,
+  commentsReplied: wire.comments_replied,
+  leadsCaptured: wire.leads_captured,
+  error: wire.error,
+  demo: wire.demo,
+  publishedAt: wire.published_at,
+  createdAt: wire.created_at,
+});
+
+const toSocialComment = (wire: SocialCommentWire): SocialComment => ({
+  id: wire.id,
+  postId: wire.post_id,
+  author: wire.author,
+  text: wire.text,
+  publicReply: wire.public_reply,
+  handoffTo: wire.handoff_to,
+  dmText: wire.dm_text,
+  live: wire.live,
+  sample: wire.sample,
+  createdAt: wire.created_at,
+});
+
+const toSocial = (wire: SocialWire): SocialAutopilot => ({
+  autopilotSocial: wire.autopilot_social,
+  brandKit: toBrandKit(wire.brand_kit),
+  livePublishing: wire.live_publishing,
+  businessMode: wire.business_mode,
+  posts: wire.posts.map(toSocialPost),
+  comments: wire.comments.map(toSocialComment),
+});
+
+const toGuardrail = (wire: GuardrailWire): GuardrailItem => ({
+  key: wire.key,
+  label: wire.label,
+  lane: wire.lane,
+  defaultLane: wire.default_lane,
+  promotable: wire.promotable,
+});
+
 // ------------------------------------------------------------------------- request
 const READ_TIMEOUT_MS = 20_000;
 
@@ -308,14 +728,22 @@ async function request<T>(
   if (options.token) headers["X-Client-Portal-Token"] = options.token;
   if (options.body !== undefined) headers["Content-Type"] = "application/json";
 
-  let response: Response;
-  try {
-    response = await fetch(`${BASE}/${path}`, {
+  const send = () =>
+    fetch(`${BASE}/${path}`, {
       method: options.method ?? "GET",
       headers,
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
       signal: options.timeoutMs ? AbortSignal.timeout(options.timeoutMs) : undefined,
     });
+
+  let response: Response;
+  try {
+    response = await send();
+    // Only a session can renew. A rejected access link is simply rejected.
+    if (response.status === 401 && !options.token && (await refreshSession())) {
+      await discardBody(response);
+      response = await send();
+    }
   } catch {
     throw new ApiError(0, "network_error", "Could not reach the portal. Check your connection.");
   }
@@ -331,12 +759,179 @@ async function request<T>(
   );
 }
 
-function createLivePortal(subdomain: string, token: string): PortalClient {
+function createLivePortal(subdomain: string, token: string | null): PortalClient {
   const tenant = encodeURIComponent(subdomain);
   const get = <T,>(path: string) => request<T>(`${tenant}/${path}`, { token, timeoutMs: READ_TIMEOUT_MS });
+  const send = <T,>(path: string, options: { method?: string; body?: unknown; timeoutMs?: number } = {}) =>
+    request<T>(`${tenant}/${path}`, { token, timeoutMs: READ_TIMEOUT_MS, ...options });
 
   return {
     mode: "live",
+    knowledge: createLiveKnowledge((path, options) => send(path, options)),
+
+    async profile() {
+      const body = await get<{
+        company_name: string;
+        business_mode: BusinessMode;
+        niche_template: string;
+        package_tier: string;
+        region_preset: "bd" | "global";
+        currency: string;
+        onboarding_stage: number;
+        pending_approvals: number;
+        is_demo: boolean;
+      }>("profile");
+      return {
+        companyName: body.company_name,
+        businessMode: body.business_mode,
+        nicheTemplate: body.niche_template,
+        packageTier: body.package_tier,
+        region: body.region_preset,
+        currency: body.currency,
+        onboardingStage: body.onboarding_stage,
+        pendingApprovals: body.pending_approvals,
+        isDemo: body.is_demo,
+      };
+    },
+
+    async roi(period) {
+      const query = period ? `?period=${encodeURIComponent(period)}` : "";
+      return toRoi(await get<RoiWire>(`roi${query}`));
+    },
+
+    async approvals() {
+      return (await get<ApprovalWire[]>("approvals")).map(toApproval);
+    },
+
+    async decideApproval(id, decision, note) {
+      return toApproval(
+        await request<ApprovalWire>(`${tenant}/approvals/${encodeURIComponent(id)}/decide`, {
+          method: "POST",
+          token,
+          body: { decision, note: note ?? null },
+          timeoutMs: READ_TIMEOUT_MS,
+        }),
+      );
+    },
+
+    async guardrails() {
+      return (await get<GuardrailWire[]>("guardrails")).map(toGuardrail);
+    },
+
+    async setGuardrail(key, lane) {
+      const body = await request<GuardrailWire[]>(`${tenant}/guardrails/${encodeURIComponent(key)}`, {
+        method: "PUT",
+        token,
+        body: { lane },
+        timeoutMs: READ_TIMEOUT_MS,
+      });
+      return body.map(toGuardrail);
+    },
+
+    async workspace() {
+      const body = await get<{
+        business_mode: BusinessMode;
+        records: {
+          id: string;
+          kind: WorkspaceKind;
+          title: string;
+          status: string;
+          detail: Record<string, unknown>;
+          due_at: string | null;
+          updated_at: string | null;
+        }[];
+      }>("workspace");
+      return {
+        businessMode: body.business_mode,
+        records: body.records.map((record) => ({
+          id: record.id,
+          kind: record.kind,
+          title: record.title,
+          status: record.status,
+          detail: record.detail,
+          dueAt: record.due_at,
+          updatedAt: record.updated_at,
+        })),
+      };
+    },
+
+    async roster() {
+      const body = await get<{
+        business_mode: BusinessMode;
+        rosters: Record<BusinessMode, { key: string; name: string; role: string; ecommerce_only: boolean; active: boolean }[]>;
+      }>("roster");
+      const agents = (mode: BusinessMode): RosterAgent[] =>
+        (body.rosters[mode] ?? []).map((agent) => ({
+          key: agent.key,
+          name: agent.name,
+          role: agent.role,
+          ecommerceOnly: agent.ecommerce_only,
+          active: agent.active,
+        }));
+      return { businessMode: body.business_mode, rosters: { general: agents("general"), ecommerce: agents("ecommerce") } };
+    },
+
+    async socialAutopilot() {
+      return toSocial(await get<SocialWire>("social-autopilot"));
+    },
+
+    async updateSocialSettings(patch) {
+      const body: Record<string, unknown> = {};
+      if (patch.autopilotSocial !== undefined) body.autopilot_social = patch.autopilotSocial;
+      if (patch.brandKit) {
+        body.brand_kit = {
+          primary_color: patch.brandKit.primaryColor,
+          accent_color: patch.brandKit.accentColor,
+          logo_text: patch.brandKit.logoText,
+          contact_cta: patch.brandKit.contactCta,
+          website_url: patch.brandKit.websiteUrl || null,
+        };
+      }
+      return toSocial(
+        await request<SocialWire>(`${tenant}/social-autopilot/settings`, {
+          method: "PATCH",
+          token,
+          body,
+          timeoutMs: READ_TIMEOUT_MS,
+        }),
+      );
+    },
+
+    async generateNow() {
+      // Drawing the visual and calling the publisher takes a few seconds.
+      const body = await request<{
+        outcome: SocialOutcome;
+        message: string;
+        post: SocialPostWire;
+        comments: SocialCommentWire[];
+      }>(`${tenant}/social-autopilot/generate-now`, { method: "POST", token, timeoutMs: 120_000 });
+      return {
+        outcome: body.outcome,
+        message: body.message,
+        post: toSocialPost(body.post),
+        comments: body.comments.map(toSocialComment),
+      };
+    },
+
+    async socialMedia(postId) {
+      const headers: Record<string, string> = {};
+      if (token) headers["X-Client-Portal-Token"] = token;
+      const url = `${BASE}/${tenant}/social-autopilot/media/${encodeURIComponent(postId)}`;
+      try {
+        let response = await fetch(url, { headers, signal: AbortSignal.timeout(READ_TIMEOUT_MS) });
+        if (response.status === 401 && !token && (await refreshSession())) {
+          await discardBody(response);
+          response = await fetch(url, { headers, signal: AbortSignal.timeout(READ_TIMEOUT_MS) });
+        }
+        if (!response.ok) {
+          await discardBody(response);
+          return null;
+        }
+        return URL.createObjectURL(await response.blob());
+      } catch {
+        return null;
+      }
+    },
 
     async overview() {
       return toOverview(await get<OverviewWire>("overview"));
@@ -444,11 +1039,28 @@ function createLivePortal(subdomain: string, token: string): PortalClient {
   };
 }
 
+/**
+ * One tenant's usage for the agency console. Signed in as staff there is no access link,
+ * so the session cookie is the credential, as on any portal page opened by the team.
+ */
+export function loadUsageAsStaff(subdomain: string): Promise<UsageSummary> {
+  return createLoadKnowledge(subdomain).usage();
+}
+
+function createLoadKnowledge(subdomain: string): KnowledgeClient {
+  const tenant = encodeURIComponent(subdomain);
+  return createLiveKnowledge((path, options = {}) =>
+    request(`${tenant}/${path}`, { token: null, timeoutMs: READ_TIMEOUT_MS, ...options }),
+  );
+}
+
 // ---------------------------------------------------------------------- connection
 export type PortalConnection =
   | { mode: "live"; client: PortalClient }
   | { mode: "mock"; client: PortalClient }
-  | { mode: "signin"; rejected: boolean };
+  | { mode: "signin"; rejected: boolean }
+  /** Signed in, but this is not a business this account may see. */
+  | { mode: "forbidden" };
 
 export function loadToken(subdomain: string): string | null {
   try {
@@ -479,9 +1091,12 @@ export function consumeLinkToken(): string | null {
  * Decides once, at connect time, whether this page shows live or sample data.
  *
  * Sample data appears only when no backend answers at all. A backend that answers,
- * even to refuse a token, means a real account exists, and fake figures would be
- * read as real ones. Once live, a failed call surfaces as an error and never falls
- * back to samples.
+ * even to refuse a credential, means a real account exists, and fake figures would
+ * be read as real ones. Once live, a failed call surfaces as an error and never
+ * falls back to samples.
+ *
+ * With no access link the session cookie is the credential, so a 200 with no token
+ * still means live.
  */
 export async function connectPortal(subdomain: string, token: string | null): Promise<PortalConnection> {
   const probe = `${encodeURIComponent(subdomain)}/overview`;
@@ -493,14 +1108,17 @@ export async function connectPortal(subdomain: string, token: string | null): Pr
         return { mode: "mock", client: createMockPortal(subdomain) };
       }
       if (error.status === 401) {
-        if (token) saveToken(subdomain, null);
-        return { mode: "signin", rejected: Boolean(token) };
+        if (!token) return { mode: "signin", rejected: false };
+        // The saved link is dead, but this person may also have a session.
+        saveToken(subdomain, null);
+        const fallback = await connectPortal(subdomain, null);
+        return fallback.mode === "signin" ? { mode: "signin", rejected: true } : fallback;
       }
+      if (error.status === 403) return { mode: "forbidden" };
       // Authenticated, but this read failed. Live, and the page reports the error.
-      if (token) return { mode: "live", client: createLivePortal(subdomain, token) };
-      return { mode: "signin", rejected: false };
+      return { mode: "live", client: createLivePortal(subdomain, token) };
     }
     throw error;
   }
-  return token ? { mode: "live", client: createLivePortal(subdomain, token) } : { mode: "signin", rejected: false };
+  return { mode: "live", client: createLivePortal(subdomain, token) };
 }

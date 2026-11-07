@@ -39,7 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..clients import service as client_service
 from ..clients import skills as skill_sync
-from ..clients.models import AuditStatus, Client, SubscriptionStatus
+from ..clients.models import AuditStatus, BusinessMode, Client, SubscriptionStatus
 from ..config.settings import Settings, get_settings
 from ..proxy.service import (
     NoPortAvailableError,
@@ -206,10 +206,18 @@ class Provisioner:
                 session, client, credentials, key_last4=key_last4(openrouter_api_key)
             )
 
+            requested = (client.config or {}).get("requested_skills")
             synced = await skill_sync.sync_skills(
-                settings, subdomain, client.plan.value
+                settings,
+                subdomain,
+                client.plan.value,
+                client.business_mode.value,
+                requested if isinstance(requested, list) else None,
             )
             client.synced_skills = synced
+            # The whole library is also mounted read-only, so the copy above is
+            # not enough to keep e-commerce skills away from a general business.
+            client.config = _config_for_mode(settings, client)
             await session.flush()
 
             container_id = await self._create_container(
@@ -548,6 +556,21 @@ class Provisioner:
 
 
 # --------------------------------------------------------------- helpers
+def _config_for_mode(settings: Settings, client: Client) -> dict[str, Any]:
+    """``client.config`` with e-commerce skills disabled unless the client is one."""
+    config = dict(client.config or {})
+    disabled = set(config.get("disabled_skills") or [])
+    if client.business_mode is BusinessMode.ECOMMERCE:
+        disabled -= skill_sync.ECOMMERCE_SKILLS
+    else:
+        disabled |= skill_sync.ECOMMERCE_SKILLS & set(skill_sync.available_skills(settings))
+    if disabled:
+        config["disabled_skills"] = sorted(disabled)
+    else:
+        config.pop("disabled_skills", None)
+    return config
+
+
 def _make_tenant_dir(path: Path, mode: int) -> None:
     path.mkdir(parents=True, exist_ok=True)
     try:

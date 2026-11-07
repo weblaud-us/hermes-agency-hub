@@ -54,6 +54,7 @@ if (-not (Test-Path $EnvFile) -or [string]::IsNullOrWhiteSpace((Get-Content $Env
   Say "Writing local test settings to .env"
   @'
 ADMIN_API_KEY=local-test-admin-key-12345
+NEXT_PUBLIC_DEMO_LOGINS=true
 POSTGRES_USER=hermes
 POSTGRES_PASSWORD=local-test-postgres-password
 POSTGRES_DB=hermes_hub
@@ -77,6 +78,13 @@ PROBE_MODE=network
 }
 
 $AdminKey = Get-EnvValue "ADMIN_API_KEY"
+$SeedPassword = Get-EnvValue "AUTH_SEED_PASSWORD"
+# Without AUTH_SEED_PASSWORD a local install seeds the published demo passwords. With it,
+# every account uses that one password instead.
+function Get-Login($Published) { if ($SeedPassword) { return $SeedPassword } else { return $Published } }
+$AdminPw = Get-Login "WeblaudAdmin!2026"
+$SalesPw = Get-Login "WeblaudSales!2026"
+$OwnerPw = Get-Login "ClientPortal!2026"
 if (-not $AdminKey) { Fail "ADMIN_API_KEY is empty in .env. Set it, or empty the file to get the local test settings." }
 
 # -------------------------------------------------------------------- docker
@@ -151,9 +159,22 @@ if (-not $Existing) {
 Status: $($Demo.status)
 
 AGENCY CONSOLE (your team)
-  Open:       $Web/admin
-  Click:      Connect hub
-  Admin key:  $AdminKey
+  Open:       $Web/login
+  Email:      sakib@weblaud.com or ishtiaq@weblaud.com (Super Admin)
+  Password:   $AdminPw
+  Email:      jubayed@weblaud.com (Sales Ops)
+  Password:   $SalesPw
+
+DEMO BUSINESS OWNERS (sample figures)
+  Open:       $Web/login?tab=client
+  Subdomain:  apex-dental (dental clinic, general service, USD)
+  Email:      owner@apex-dental.com
+  Subdomain:  suvana (online store, e-commerce, Bangladesh)
+  Email:      owner@suvana.com
+  Password:   $OwnerPw   (or the 6-digit code 246810)
+
+SCRIPTS AND THE API DOCS
+  X-API-Key:  $AdminKey
 
 CLIENT DASHBOARD (Demo Company's control panel)
   Open:       $($Demo.dashboard_url)
@@ -206,8 +227,8 @@ if ($HaveLogins) {
   Write-Host "Saved in $LoginsFile"
 } else {
   Warn "The demo client exists but its saved logins are gone, and the hub cannot show the password again."
-  Write-Host "Agency console: $Web/admin"
-  Write-Host "Admin key:      $AdminKey"
+  Write-Host "Sign in:        $Web/login"
+  Write-Host "Passwords:      see $LoginsFile, or the sign-in table in README.md"
   Write-Host "To get new demo logins, remove the demo client (6.8 in LOCAL_TESTING.md) and run this again."
 }
 

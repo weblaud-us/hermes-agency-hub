@@ -40,6 +40,13 @@ skills:
     - {{ name | tojson }}
 {% endfor %}
 {% endif %}
+{% if config.get('ai_model') %}
+
+# The AI preset the business owner chose in the client portal.
+model:
+  default: {{ config.get('ai_model') | tojson }}
+  provider: openrouter
+{% endif %}
 
 # ---- Agency metadata (informational) --------------------------------------
 # Not read by the agent. Present so an operator opening a shell in the

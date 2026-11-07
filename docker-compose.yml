@@ -68,7 +68,7 @@ services:
     volumes:
       - ${DATA_ROOT:-/srv/hermes-multi}:/data
     command: >
-      sh -c "mkdir -p /data/tenants /data/archive /data/shared-skills /data/nginx/conf.d
+      sh -c "mkdir -p /data/tenants /data/archive /data/shared-skills /data/social-media /data/nginx/conf.d
       && chown -R 10001:10001 /data
       && chmod 755 /data
       && echo '[hub-init] data root ready'"
@@ -103,6 +103,16 @@ services:
       DEBUG: ${DEBUG:-true}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       ADMIN_API_KEY: ${ADMIN_API_KEY:?set ADMIN_API_KEY in .env}
+      # Both optional. See .env.example.
+      JWT_SECRET: ${JWT_SECRET:-}
+      AUTH_SEED_PASSWORD: ${AUTH_SEED_PASSWORD:-}
+      # Social autopilot. All optional; blank runs it in sandbox mode. See .env.example.
+      META_PAGE_ACCESS_TOKEN: ${META_PAGE_ACCESS_TOKEN:-}
+      META_PAGE_ID: ${META_PAGE_ID:-}
+      META_IG_USER_ID: ${META_IG_USER_ID:-}
+      META_LIVE_TENANT: ${META_LIVE_TENANT:-}
+      SOCIAL_PUBLIC_BASE_URL: ${SOCIAL_PUBLIC_BASE_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-hermes}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-hermes_hub}
       BASE_DOMAIN: ${BASE_DOMAIN:-localhost}
       HUB_PUBLIC_URL: ${HUB_PUBLIC_URL:-http://localhost:8080}
@@ -173,6 +183,7 @@ services:
         NEXT_PUBLIC_API_URL: ${HUB_PUBLIC_URL:-http://localhost:8080}
         NEXT_PUBLIC_BASE_DOMAIN: ${BASE_DOMAIN:-localhost}
         NEXT_PUBLIC_TENANT_SLOTS: ${NEXT_PUBLIC_TENANT_SLOTS:-20}
+        NEXT_PUBLIC_DEMO_LOGINS: ${NEXT_PUBLIC_DEMO_LOGINS:-}
     image: hermes-agency-web:local
     container_name: hermes-web
     restart: unless-stopped

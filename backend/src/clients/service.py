@@ -13,8 +13,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config.security import new_internal_token
 from ..config.settings import Settings
-from .models import AuditLog, AuditStatus, Client, ClientPlan, SubscriptionStatus
+from .models import (
+    PLAN_FOR_TIER,
+    TIER_FOR_PLAN,
+    AuditLog,
+    AuditStatus,
+    Client,
+    ClientPlan,
+    RegionPreset,
+    SubscriptionStatus,
+)
 from .schemas import ClientCreate, ClientUpdate
+
+#: Currencies each region preset may bill in, default first.
+REGION_CURRENCIES = {
+    RegionPreset.BD: ("BDT",),
+    RegionPreset.GLOBAL: ("USD", "EUR", "GBP"),
+}
 
 logger = logging.getLogger(__name__)
 
@@ -221,24 +236,38 @@ async def create_client(
     row instead of conflicting with it; see :func:`_is_retry_of`.
     """
     slug = derive_slug(settings, payload)
+    currency = resolve_currency(payload.region_preset, payload.currency)
     existing = await get_by_slug(session, slug)
     if existing is not None:
         if not _is_retry_of(existing, payload):
             raise ClientConflictError(f"Subdomain '{slug}' is already taken.")
         return await _prepare_retry(session, settings, existing, payload)
 
-    plan = settings.plan_for(payload.plan.value)
+    resolved_plan = _plan_of(payload)
+    plan = settings.plan_for(resolved_plan.value)
     client = Client(
         company_name=payload.company_name,
         slug=slug,
         subdomain=settings.subdomain_for(slug),
         contact_email=str(payload.contact_email),
-        plan=payload.plan,
+        plan=resolved_plan,
+        business_mode=payload.business_mode,
+        niche_template=payload.niche_template,
+        package_tier=TIER_FOR_PLAN[resolved_plan],
+        region_preset=payload.region_preset,
+        currency=currency,
+        onboarding_stage=1,
+        baseline_metrics_json=(
+            payload.baseline_metrics.model_dump() if payload.baseline_metrics else None
+        ),
+        autopilot_social=payload.autopilot_social,
+        brand_kit_json=payload.brand_kit.model_dump() if payload.brand_kit else None,
+        guardrails_json={},
         subscription_status=SubscriptionStatus.PENDING,
         image=payload.image or settings.client_image,
         container_name=settings.container_name_for(slug),
-        cpu_limit=settings.cpus_for(payload.plan.value),
-        memory_limit=settings.memory_for(payload.plan.value),
+        cpu_limit=settings.cpus_for(resolved_plan.value),
+        memory_limit=settings.memory_for(resolved_plan.value),
         database_name=(
             settings.client_database_name(slug)
             if settings.provision_client_databases
@@ -269,6 +298,24 @@ async def create_client(
     return client
 
 
+def resolve_currency(region: RegionPreset, requested: str | None) -> str:
+    """The currency a client bills in, or explain why ``requested`` cannot be."""
+    allowed = REGION_CURRENCIES[region]
+    if requested is None:
+        return allowed[0]
+    currency = requested.upper()
+    if currency not in allowed:
+        raise ClientConflictError(
+            f"{currency} is not available for the {region.value} region; "
+            f"choose one of {', '.join(allowed)}."
+        )
+    return currency
+
+
+def _plan_of(payload: ClientCreate) -> ClientPlan:
+    return PLAN_FOR_TIER[payload.package_tier] if payload.package_tier else payload.plan
+
+
 def _is_retry_of(client: Client, payload: ClientCreate) -> bool:
     """Whether ``payload`` is the same onboarding, tried again.
 
@@ -280,9 +327,15 @@ def _is_retry_of(client: Client, payload: ClientCreate) -> bool:
       replace it.
     * Same contact: the retry reuses this tenant's data directory, so a
       different customer asking for the same subdomain has to stay a conflict.
+
+    A seeded demo tenant counts too: it holds the subdomain but has never been
+    provisioned, and provisioning it for real should simply replace the samples.
     """
     return (
-        client.subscription_status is SubscriptionStatus.FAILED
+        (
+            client.subscription_status is SubscriptionStatus.FAILED
+            or (client.config or {}).get("demo_seed") is True
+        )
         and client.container_id is None
         and client.contact_email.lower() == str(payload.contact_email).lower()
     )
@@ -292,13 +345,29 @@ async def _prepare_retry(
     session: AsyncSession, settings: Settings, client: Client, payload: ClientCreate
 ) -> Client:
     """Apply the resubmitted request; a bad image may be why the last run failed."""
+    was_demo = (client.config or {}).get("demo_seed") is True
+    plan = _plan_of(payload)
     client.company_name = payload.company_name
-    client.plan = payload.plan
+    client.plan = plan
     client.image = payload.image or settings.client_image
-    client.cpu_limit = settings.cpus_for(payload.plan.value)
-    client.memory_limit = settings.memory_for(payload.plan.value)
+    client.cpu_limit = settings.cpus_for(plan.value)
+    client.memory_limit = settings.memory_for(plan.value)
     client.config = payload.config
     client.channels = payload.channels
+    client.business_mode = payload.business_mode
+    client.niche_template = payload.niche_template
+    client.package_tier = TIER_FOR_PLAN[plan]
+    client.region_preset = payload.region_preset
+    client.currency = resolve_currency(payload.region_preset, payload.currency)
+    if payload.baseline_metrics:
+        client.baseline_metrics_json = payload.baseline_metrics.model_dump()
+    client.autopilot_social = payload.autopilot_social
+    if payload.brand_kit:
+        client.brand_kit_json = payload.brand_kit.model_dump()
+    if was_demo:
+        from ..ops.demo import clear_demo_rows  # avoids a clients <-> ops import cycle
+
+        await clear_demo_rows(session, client)
     await session.flush()
     await record_audit(
         session,
@@ -318,9 +387,26 @@ async def update_client(
     if "contact_email" in data and data["contact_email"] is not None:
         data["contact_email"] = str(data["contact_email"])
 
+    # The package and the resource plan are two names for one choice.
+    if (tier := data.get("package_tier")) is not None:
+        data["plan"] = PLAN_FOR_TIER[tier]
+    elif (plan := data.get("plan")) is not None:
+        data["package_tier"] = TIER_FOR_PLAN[plan]
+
     if (plan := data.get("plan")) is not None:
         client.cpu_limit = settings.cpus_for(plan.value)
         client.memory_limit = settings.memory_for(plan.value)
+
+    if data.get("region_preset") is not None or data.get("currency") is not None:
+        region = data.get("region_preset") or client.region_preset
+        keep = None if region is not client.region_preset else client.currency
+        data["currency"] = resolve_currency(region, data.get("currency") or keep)
+
+    if (baseline := data.pop("baseline_metrics", None)) is not None:
+        # model_dump already turned this into a plain dict of the validated fields.
+        data["baseline_metrics_json"] = baseline
+    if (brand_kit := data.pop("brand_kit", None)) is not None:
+        data["brand_kit_json"] = brand_kit
 
     for field, value in data.items():
         if value is not None:

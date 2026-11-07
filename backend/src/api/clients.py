@@ -1,6 +1,7 @@
 """HTTP surface for client lifecycle management.
 
-Every route on this router requires the agency admin key. A tenant's own
+Every route here is for the agency: a team member's session or the admin key,
+gated by the permission it needs (see ``auth/permissions.py``). A tenant's own
 traffic goes through nginx straight to its container, authenticated by that
 tenant's own credentials. The one tenant-facing surface on the hub is the client
 portal, in ``portal/``, which has its own per-tenant authentication.
@@ -11,11 +12,14 @@ from __future__ import annotations
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..auth import service as auth_service
+from ..auth.dependencies import Principal, get_principal, require_permission
+from ..auth.permissions import Permission
 from ..clients import service as client_service
-from ..clients.models import ClientPlan, SubscriptionStatus
+from ..clients.models import ONBOARDING_INSTANCE_LIVE, ClientPlan, SubscriptionStatus
 from ..clients.schemas import (
     AuditLogRead,
     ClientCreate,
@@ -31,17 +35,27 @@ from ..clients.schemas import (
     TeardownResponse,
 )
 from ..config.database import get_session
-from ..config.security import require_admin
 from ..config.settings import Settings, get_settings
 from ..orchestrator.docker_service import DockerService, get_docker_service
 from ..orchestrator.provisioner import Provisioner, get_provisioner
 
 logger = logging.getLogger(__name__)
 
+#: Fields only some roles may change, and the permission each needs.
+_RESTRICTED_FIELDS = {
+    "image": Permission.SERVER_SETTINGS,
+    "config": Permission.SERVER_SETTINGS,
+    "channels": Permission.SERVER_SETTINGS,
+    "plan": Permission.BILLING,
+    "package_tier": Permission.BILLING,
+    "stripe_customer_id": Permission.BILLING,
+    "stripe_subscription_id": Permission.BILLING,
+}
+
 router = APIRouter(
     prefix="/clients",
     tags=["clients"],
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(get_principal)],
 )
 
 
@@ -55,6 +69,7 @@ def _to_read(client, settings: Settings) -> ClientRead:
 # --------------------------------------------------------------- onboarding
 @router.post(
     "/onboard",
+    dependencies=[Depends(require_permission(Permission.CONTAINERS_PROVISION))],
     response_model=OnboardResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Onboard a new client",
@@ -91,12 +106,24 @@ async def onboard_client(
             image=payload.image,
             config=payload.config,
             channels=payload.channels,
+            business_mode=payload.business_mode,
+            niche_template=payload.niche_template,
+            package_tier=payload.package_tier,
+            region_preset=payload.region_preset,
+            currency=payload.currency,
+            baseline_metrics=payload.baseline_metrics,
+            autopilot_social=payload.autopilot_social,
+            brand_kit=payload.brand_kit,
         ),
     )
 
     result = await provisioner.provision_client(
         session, client, payload.openrouter_api_key
     )
+    if result.healthy and client.onboarding_stage < ONBOARDING_INSTANCE_LIVE:
+        client.onboarding_stage = ONBOARDING_INSTANCE_LIVE
+    # So the owner can sign in with a one-time code from day one.
+    await auth_service.ensure_client_owner(session, client)
 
     return OnboardResponse(
         client_id=client.id,
@@ -119,6 +146,7 @@ async def onboard_client(
 # ----------------------------------------------------------------- teardown
 @router.delete(
     "/{client_id}",
+    dependencies=[Depends(require_permission(Permission.CONTAINERS_TERMINATE))],
     response_model=TeardownResponse,
     summary="Decommission a client",
 )
@@ -162,6 +190,7 @@ async def delete_client(
 # ------------------------------------------------------------------- health
 @router.get(
     "/{client_id}/health",
+    dependencies=[Depends(require_permission(Permission.CLIENTS_READ))],
     response_model=ClientHealth,
     summary="Check a client's container and services",
 )
@@ -195,7 +224,12 @@ async def client_health(
 
 
 # -------------------------------------------------------------------- reads
-@router.get("", response_model=ClientList, summary="List clients")
+@router.get(
+    "",
+    response_model=ClientList,
+    summary="List clients",
+    dependencies=[Depends(require_permission(Permission.CLIENTS_READ))],
+)
 async def list_clients(
     subscription_status: SubscriptionStatus | None = None,
     plan: ClientPlan | None = None,
@@ -221,7 +255,12 @@ async def list_clients(
     )
 
 
-@router.get("/stats", response_model=HubStats, summary="Fleet summary")
+@router.get(
+    "/stats",
+    response_model=HubStats,
+    summary="Fleet summary",
+    dependencies=[Depends(require_permission(Permission.CLIENTS_READ))],
+)
 async def hub_stats(
     session: AsyncSession = Depends(get_session),
     docker: DockerService = Depends(get_docker_service),
@@ -234,7 +273,12 @@ async def hub_stats(
     return HubStats(**data, running_containers=await docker.running_count())
 
 
-@router.get("/{client_id}", response_model=ClientRead, summary="Get one client")
+@router.get(
+    "/{client_id}",
+    response_model=ClientRead,
+    summary="Get one client",
+    dependencies=[Depends(require_permission(Permission.CLIENTS_READ))],
+)
 async def get_client(
     client_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
@@ -244,10 +288,16 @@ async def get_client(
     return _to_read(client, settings)
 
 
-@router.patch("/{client_id}", response_model=ClientRead, summary="Update a client")
+@router.patch(
+    "/{client_id}",
+    response_model=ClientRead,
+    summary="Update a client",
+    dependencies=[Depends(require_permission(Permission.CLIENTS_WRITE))],
+)
 async def update_client(
     client_id: uuid.UUID,
     payload: ClientUpdate,
+    principal: Principal = Depends(get_principal),
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> ClientRead:
@@ -257,6 +307,12 @@ async def update_client(
     resize a running container — Docker cannot change those limits in place.
     Re-provision to apply new limits.
     """
+    for field in payload.model_fields_set:
+        needed = _RESTRICTED_FIELDS.get(field)
+        if needed is not None and not principal.can(needed):
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN, detail=f"Your role cannot change {field}."
+            )
     client = await client_service.get_client(session, client_id)
     await client_service.update_client(session, settings, client, payload)
     return _to_read(client, settings)
@@ -264,6 +320,7 @@ async def update_client(
 
 @router.get(
     "/{client_id}/logs",
+    dependencies=[Depends(require_permission(Permission.CLIENTS_LOGS))],
     response_model=ContainerLogs,
     summary="Tail a client's container logs",
 )
@@ -284,6 +341,7 @@ async def client_logs(
 
 @router.get(
     "/{client_id}/audit",
+    dependencies=[Depends(require_permission(Permission.CLIENTS_READ))],
     response_model=list[AuditLogRead],
     summary="Read a client's audit trail",
 )

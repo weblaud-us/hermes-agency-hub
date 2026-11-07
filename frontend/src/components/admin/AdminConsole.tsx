@@ -1,38 +1,42 @@
 "use client";
 
 import { AnimatePresence, motion } from "motion/react";
-import { AlertTriangle, KeyRound, RotateCw } from "lucide-react";
+import { AlertTriangle, BadgeCheck, Contact, LibraryBig, RotateCw, Server } from "lucide-react";
 import { useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ConnectHubDialog } from "@/components/admin/ConnectHubDialog";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { ClientOpsDrawer } from "@/components/admin/ClientOpsDrawer";
+import { ProspectCrm } from "@/components/admin/ProspectCrm";
 import { ProvisionModal, type ProvisionTab } from "@/components/admin/ProvisionModal";
+import { ShadowQaQueue } from "@/components/admin/ShadowQaQueue";
+import { StarterKitsManager } from "@/components/admin/StarterKitsManager";
 import { TelemetryHeader } from "@/components/admin/TelemetryHeader";
 import { TenantTable } from "@/components/admin/TenantTable";
 import { TerminalDrawer } from "@/components/admin/TerminalDrawer";
 import { TerminateDialog } from "@/components/admin/TerminateDialog";
+import { Segmented } from "@/components/ui/Segmented";
 import { ToastProvider, useToast } from "@/components/ui/Toaster";
 import {
   ApiError,
-  HUB_URL,
   connectHub,
-  loadAdminKey,
-  saveAdminKey,
   type FleetSnapshot,
   type HubConnection,
-  type MockReason,
   type OnboardResult,
   type Tenant,
 } from "@/lib/api";
+import { goTo, PERMISSIONS } from "@/lib/auth";
+import { LocaleProvider } from "@/lib/i18n";
 import { SPRING } from "@/lib/motion";
 import { TIERS, type TierId } from "@/lib/provisioning";
 import { copyToClipboard } from "@/lib/utils";
 
-const MOCK_NOTICE: Record<MockReason, string> = {
-  "no-url": "NEXT_PUBLIC_API_URL is not set, so this console is running on mock telemetry.",
-  offline: `The hub at ${HUB_URL} is unreachable, so this console is running on mock telemetry.`,
-  "no-key": "The hub is reachable. Connect with the admin key to go live; until then this is mock telemetry.",
-  "key-rejected": "The hub rejected that admin key, so this console is back on mock telemetry.",
-};
+type AdminTab = "fleet" | "qa" | "crm" | "kits";
+
+const TABS: { value: AdminTab; label: string; icon: ReactNode; permission: string }[] = [
+  { value: "fleet", label: "Fleet & Provisioning", icon: <Server aria-hidden className="size-3.5" />, permission: PERMISSIONS.clientsRead },
+  { value: "qa", label: "Shadow-Week QA", icon: <BadgeCheck aria-hidden className="size-3.5" />, permission: PERMISSIONS.qa },
+  { value: "crm", label: "Prospect CRM", icon: <Contact aria-hidden className="size-3.5" />, permission: PERMISSIONS.crm },
+  { value: "kits", label: "Starter Kits & Skills", icon: <LibraryBig aria-hidden className="size-3.5" />, permission: PERMISSIONS.skillsRead },
+];
 
 function ConsoleBody() {
   const params = useSearchParams();
@@ -41,9 +45,8 @@ function ConsoleBody() {
   const [connection, setConnection] = useState<HubConnection | null>(null);
   const [snapshot, setSnapshot] = useState<FleetSnapshot | null>(null);
   const [staleSince, setStaleSince] = useState<number | null>(null);
-
-  const [connectOpen, setConnectOpen] = useState(false);
-  const [connecting, setConnecting] = useState(false);
+  const [requestedTab, setRequestedTab] = useState<string | null>(() => params.get("tab"));
+  const [managing, setManaging] = useState<Tenant | null>(null);
   const [provision, setProvision] = useState<{ key: number; open: boolean; tab: ProvisionTab; tier: TierId }>(() => {
     const requested = params.get("provision");
     const tier = params.get("tier") as TierId | null;
@@ -60,7 +63,13 @@ function ConsoleBody() {
   const [mintingPortalLink, setMintingPortalLink] = useState<Set<string>>(new Set());
 
   const searchRef = useRef<HTMLInputElement>(null);
-  const hub = connection?.hub ?? null;
+  const ready = connection && connection.mode !== "signin" ? connection : null;
+  const hub = ready?.hub ?? null;
+  const user = ready?.user ?? null;
+  const permissions = user?.permissions ?? [];
+  const canReadFleet = permissions.includes(PERMISSIONS.clientsRead);
+  const visibleTabs = TABS.filter((tab) => permissions.includes(tab.permission));
+  const tab = (visibleTabs.find((row) => row.value === requestedTab) ?? visibleTabs[0])?.value ?? null;
 
   const refresh = useCallback(async () => {
     if (!hub) return;
@@ -70,20 +79,22 @@ function ConsoleBody() {
       setStaleSince(null);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
-        saveAdminKey(null);
-        setSnapshot(null);
-        setConnection(await connectHub(null));
-        notify("The hub no longer accepts this admin key.", "error");
+        goTo(`/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
         return;
       }
       setStaleSince((current) => current ?? Date.now());
     }
-  }, [hub, notify]);
+  }, [hub]);
 
   useEffect(() => {
     let cancelled = false;
-    connectHub(loadAdminKey()).then((next) => {
-      if (!cancelled) setConnection(next);
+    connectHub().then((next) => {
+      if (cancelled) return;
+      if (next.mode === "signin") {
+        goTo(`/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+        return;
+      }
+      setConnection(next);
     });
     return () => {
       cancelled = true;
@@ -91,7 +102,7 @@ function ConsoleBody() {
   }, []);
 
   useEffect(() => {
-    if (!hub) return;
+    if (!hub || !canReadFleet) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
@@ -103,7 +114,7 @@ function ConsoleBody() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [hub, refresh]);
+  }, [hub, refresh, canReadFleet]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -116,29 +127,11 @@ function ConsoleBody() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  async function connectWithKey(key: string) {
-    setConnecting(true);
-    const next = await connectHub(key);
-    setConnecting(false);
-    if (next.mode === "live") {
-      setSnapshot(null);
-      setStaleSince(null);
-      setConnection(next);
-      setConnectOpen(false);
-      notify("Connected to the live hub.");
-      return null;
-    }
-    if (next.reason === "offline") return "The hub is not responding. Check that it is running and try again.";
-    return "The hub rejected that key.";
-  }
-
-  async function disconnect() {
-    saveAdminKey(null);
-    setSnapshot(null);
-    setStaleSince(null);
-    setConnection(await connectHub(null));
-    setConnectOpen(false);
-    notify("Disconnected. The console is on mock telemetry.", "info");
+  function selectTab(next: AdminTab) {
+    setRequestedTab(next);
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", next);
+    window.history.replaceState(window.history.state, "", url);
   }
 
   function openProvision(tab: ProvisionTab = "cluster", tier: TierId = "growth") {
@@ -211,8 +204,7 @@ function ConsoleBody() {
     }
   }
 
-  const mode = connection?.mode ?? null;
-  const mockReason = connection?.mode === "mock" ? connection.reason : null;
+  const mode = ready?.mode ?? null;
 
   return (
     <div className="mx-auto max-w-[1500px] px-4 py-4 sm:px-6 sm:py-6">
@@ -220,8 +212,9 @@ function ConsoleBody() {
         snapshot={snapshot}
         mode={mode}
         stale={staleSince !== null}
-        onConnect={() => setConnectOpen(true)}
+        user={user}
         onProvision={() => openProvision()}
+        showFleet={tab === "fleet"}
       />
 
       <AnimatePresence initial={false}>
@@ -252,7 +245,7 @@ function ConsoleBody() {
             </div>
           </motion.div>
         )}
-        {mockReason && (
+        {mode === "mock" && (
           <motion.div
             key="mock"
             initial={{ height: 0, opacity: 0 }}
@@ -264,41 +257,61 @@ function ConsoleBody() {
             <div className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl border border-warn/30 bg-warn/8 px-4 py-3 text-sm text-ink-2">
               <AlertTriangle aria-hidden className="size-4 shrink-0 text-warn" />
               <span className="min-w-0 flex-1">
-                {MOCK_NOTICE[mockReason]} Tenants, credentials and actions here are simulated.
+                The hub is unreachable, so this console is showing sample data. Tenants, credentials and actions here are
+                simulated.
               </span>
-              {mockReason !== "no-url" && (
-                <button
-                  type="button"
-                  onClick={() => setConnectOpen(true)}
-                  className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-white/15 px-3 text-xs font-medium text-ink hover:border-white/30"
-                >
-                  <KeyRound aria-hidden className="size-3.5" />
-                  Connect hub
-                </button>
-              )}
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      <TenantTable
-        tenants={snapshot?.tenants ?? null}
-        canRestart={hub?.canRestart ?? false}
-        restarting={restarting}
-        mintingPortalLink={mintingPortalLink}
-        searchRef={searchRef}
-        onProvision={() => openProvision()}
-        onOpenLogs={setLogTenant}
-        onRestart={restart}
-        onTerminate={setTerminating}
-        onCopyPortalLink={copyPortalLink}
-      />
+      {visibleTabs.length > 1 && tab && (
+        <div className="mt-4">
+          <Segmented<AdminTab>
+            label="Console sections"
+            value={tab}
+            onChange={selectTab}
+            className="max-w-full flex-wrap rounded-2xl"
+            optionClassName="px-3 sm:px-4"
+            options={visibleTabs.map(({ value, label, icon }) => ({
+              value,
+              label: (
+                <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                  {icon}
+                  {label}
+                </span>
+              ),
+            }))}
+          />
+        </div>
+      )}
 
-      {hub && (
+      {tab === "fleet" && (
+        <TenantTable
+          tenants={snapshot?.tenants ?? null}
+          canRestart={hub?.canRestart ?? false}
+          restarting={restarting}
+          mintingPortalLink={mintingPortalLink}
+          searchRef={searchRef}
+          onProvision={() => openProvision()}
+          onOpenLogs={setLogTenant}
+          onRestart={restart}
+          onTerminate={setTerminating}
+          onCopyPortalLink={copyPortalLink}
+          onManage={setManaging}
+          permissions={permissions}
+        />
+      )}
+      {tab === "qa" && ready && <ShadowQaQueue ops={ready.ops} />}
+      {tab === "crm" && ready && <ProspectCrm ops={ready.ops} permissions={permissions} />}
+      {tab === "kits" && ready && <StarterKitsManager ops={ready.ops} permissions={permissions} />}
+
+      {hub && ready && permissions.includes(PERMISSIONS.provision) && (
         <ProvisionModal
           key={provision.key}
           open={provision.open}
           hub={hub}
+          ops={ready.ops}
           initialTab={provision.tab}
           initialTier={provision.tier}
           onClose={() => setProvision((current) => ({ ...current, open: false }))}
@@ -312,22 +325,26 @@ function ConsoleBody() {
         onCancel={() => setTerminating(null)}
         onConfirm={terminate}
       />
-      <ConnectHubDialog
-        open={connectOpen}
-        live={mode === "live"}
-        connecting={connecting}
-        onClose={() => setConnectOpen(false)}
-        onConnect={connectWithKey}
-        onDisconnect={disconnect}
-      />
+      {ready && (
+        <ClientOpsDrawer
+          tenant={managing}
+          ops={ready.ops}
+          canEditRoi={permissions.includes(PERMISSIONS.roiWrite)}
+          mock={mode === "mock"}
+          onClose={() => setManaging(null)}
+          onChanged={refresh}
+        />
+      )}
     </div>
   );
 }
 
 export function AdminConsole() {
   return (
-    <ToastProvider>
-      <ConsoleBody />
-    </ToastProvider>
+    <LocaleProvider>
+      <ToastProvider>
+        <ConsoleBody />
+      </ToastProvider>
+    </LocaleProvider>
   );
 }

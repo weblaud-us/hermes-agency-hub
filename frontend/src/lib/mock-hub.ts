@@ -11,7 +11,15 @@ import {
   type TenantHealth,
   type TenantStatus,
 } from "./hub-types";
-import { BASE_DOMAIN, TIERS, type TierId } from "./provisioning";
+import {
+  BASE_DOMAIN,
+  PACKAGE_FOR_TIER,
+  TIERS,
+  type BusinessMode,
+  type NicheTemplate,
+  type RegionPreset,
+  type TierId,
+} from "./provisioning";
 import { delay } from "./utils";
 
 const HOST_MEMORY_GB = 32;
@@ -30,10 +38,25 @@ interface Seed {
   uptimeDays: number;
   skills: number;
   retainer?: number;
+  businessMode?: BusinessMode;
+  niche?: NicheTemplate;
+  region?: RegionPreset;
+  stage?: number;
 }
 
 const SEEDS: Seed[] = [
-  { company: "Suvana", tier: "growth", memoryGb: 1.1, cpuPct: 42, uptimeDays: 47.3, skills: 6 },
+  {
+    company: "Suvana",
+    tier: "growth",
+    memoryGb: 1.1,
+    cpuPct: 42,
+    uptimeDays: 47.3,
+    skills: 6,
+    businessMode: "ecommerce",
+    niche: "ecommerce_store",
+    region: "bd",
+    stage: 6,
+  },
   {
     company: "Kestrel Freight",
     tier: "enterprise",
@@ -44,11 +67,30 @@ const SEEDS: Seed[] = [
     skills: 8,
     retainer: 1560,
   },
-  { company: "Orchid Dental Group", tier: "starter", memoryGb: 0.6, cpuPct: 24, uptimeDays: 18.6, skills: 3 },
+  {
+    company: "Orchid Dental Group",
+    tier: "starter",
+    memoryGb: 0.6,
+    cpuPct: 24,
+    uptimeDays: 18.6,
+    skills: 3,
+    niche: "dental_clinic",
+    region: "bd",
+    stage: 4,
+  },
   { company: "Lumen Home Goods", tier: "growth", memoryGb: 1.3, cpuPct: 51, uptimeDays: 33.9, skills: 6 },
   { company: "Harbor & Pine", tier: "growth", memoryGb: 1.0, cpuPct: 37, uptimeDays: 61.2, skills: 5 },
   { company: "Atlas Field Services", tier: "enterprise", mode: "client-vps", memoryGb: 2.1, cpuPct: 46, uptimeDays: 124.4, skills: 8 },
-  { company: "Marigold Skincare", tier: "growth", memoryGb: 1.2, cpuPct: 44, uptimeDays: 12.8, skills: 6 },
+  {
+    company: "Marigold Skincare",
+    tier: "growth",
+    memoryGb: 1.2,
+    cpuPct: 44,
+    uptimeDays: 12.8,
+    skills: 6,
+    businessMode: "ecommerce",
+    stage: 6,
+  },
   { company: "Quarry Lane Legal", tier: "enterprise", memoryGb: 2.0, cpuPct: 39, uptimeDays: 75.5, skills: 7 },
   { company: "Beacon Roofing", tier: "starter", memoryGb: 0.5, cpuPct: 19, uptimeDays: 9.2, skills: 2 },
   { company: "Tern Cycle Works", tier: "growth", memoryGb: 0.9, cpuPct: 31, uptimeDays: 27.7, skills: 5 },
@@ -156,6 +198,15 @@ export function createMockHub(): HubClient {
       secrets: { password: randomToken(9), apiKey: `sk-${slug}-${randomToken(14)}` },
       monthlyRetainer: seed.retainer ?? tier.monthly,
       model: "anthropic/claude-sonnet-5.5",
+      businessMode: seed.businessMode ?? "general",
+      nicheTemplate: seed.niche ?? (seed.businessMode === "ecommerce" ? "ecommerce_store" : "custom"),
+      packageTier: PACKAGE_FOR_TIER[seed.tier],
+      region: seed.region ?? "global",
+      currency: seed.region === "bd" ? "BDT" : "USD",
+      onboardingStage: seed.stage ?? (status === "running" ? 7 : 2),
+      baseline: null,
+      autopilotSocial: true,
+      brandPrimary: null,
       logBuffer: [...BOOT_LOG],
       restartCount: 0,
     };
@@ -273,6 +324,15 @@ export function createMockHub(): HubClient {
         secrets: { password, apiKey },
         monthlyRetainer: tier.monthly,
         model: input.model,
+        businessMode: input.businessMode,
+        nicheTemplate: input.nicheTemplate,
+        packageTier: PACKAGE_FOR_TIER[input.tier],
+        region: input.region,
+        currency: input.currency,
+        onboardingStage: 5,
+        baseline: input.baseline,
+        autopilotSocial: input.autopilotSocial,
+        brandPrimary: input.brandPrimary,
         logBuffer: [...BOOT_LOG],
         restartCount: 0,
       };

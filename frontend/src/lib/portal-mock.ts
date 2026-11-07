@@ -15,6 +15,9 @@ import type {
   ReconnectResult,
 } from "./portal-api";
 import { ApiError } from "./hub-types";
+import { createMockKnowledge } from "./knowledge-mock";
+import { createGrowthMock } from "./portal-growth-mock";
+import { createSocialMock } from "./portal-social-mock";
 import { delay } from "./utils";
 
 const DAY = 86_400_000;
@@ -482,6 +485,13 @@ export function createMockPortal(subdomain: string): PortalClient {
 
   return {
     mode: "mock",
+    knowledge: createMockKnowledge(
+      subdomain,
+      profile.company,
+      /dental|clinic|salon|beauty|restaurant|travel/.test(subdomain) ? "general" : "ecommerce",
+    ),
+    ...createGrowthMock(profile.company, subdomain),
+    ...createSocialMock(profile.company, subdomain),
 
     async overview(): Promise<PortalOverview> {
       await delay(260);

@@ -1,8 +1,8 @@
 import type { Metadata, Viewport } from "next";
-import { JetBrains_Mono, Plus_Jakarta_Sans } from "next/font/google";
+import { JetBrains_Mono, Noto_Sans_Bengali, Plus_Jakarta_Sans } from "next/font/google";
 import type { ReactNode } from "react";
 import { MotionProvider } from "@/components/providers/MotionProvider";
-import { BRAND } from "@/lib/provisioning";
+import { BRAND, TAGLINE } from "@/lib/provisioning";
 import "./globals.css";
 
 const jakarta = Plus_Jakarta_Sans({
@@ -17,13 +17,21 @@ const jetbrains = JetBrains_Mono({
   display: "swap",
 });
 
+/** Covers Bangla only, and is fetched only once Bangla text is on the page. */
+const bengali = Noto_Sans_Bengali({
+  subsets: ["bengali"],
+  variable: "--font-bengali",
+  display: "swap",
+  preload: false,
+});
+
 export const metadata: Metadata = {
   title: {
-    default: `${BRAND} | Managed Autonomous AI Operations Agents`,
+    default: `${BRAND} | ${TAGLINE}`,
     template: `%s | ${BRAND}`,
   },
   description:
-    "Deploy self-improving AI operations agents across every client workflow, each in its own hardened container with persistent memory and scheduled jobs.",
+    "Your outsourced digital growth and AI operations team for small businesses, in Bangladesh and worldwide.",
 };
 
 export const viewport: Viewport = {
@@ -33,7 +41,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" data-scroll-behavior="smooth" className={`${jakarta.variable} ${jetbrains.variable}`}>
+    <html lang="en" data-scroll-behavior="smooth" className={`${jakarta.variable} ${jetbrains.variable} ${bengali.variable}`}>
       {/* Browser extensions add attributes to <body> before React hydrates. */}
       <body suppressHydrationWarning>
         <noscript>

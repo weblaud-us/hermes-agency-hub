@@ -20,6 +20,8 @@ Two distinctions in this module are load-bearing and easy to get wrong:
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 from functools import lru_cache
 from pathlib import Path
@@ -34,6 +36,8 @@ if TYPE_CHECKING:  # avoid a circular import at runtime
 # .../backend/src/config/settings.py -> parents[2] == backend/, parents[3] == repo root
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 REPO_ROOT = BACKEND_ROOT.parent
+
+_DEFAULT_ADMIN_API_KEY = "change-me-admin-key"
 
 
 class PlanResources(BaseModel):
@@ -56,7 +60,15 @@ class PlanResources(BaseModel):
 DEFAULT_PLANS: dict[str, PlanResources] = {
     "starter": PlanResources(
         max_conversations=1_000,
-        skills=["lead-qualification"],
+        # Weblaud's "Presence" package. Business-mode skills are added on top
+        # by clients.skills.skills_for_client.
+        skills=[
+            "lead-qualification",
+            "ai-employee-orchestrator",
+            "designer-brand-studio",
+            "social-media-autopilot",
+            "roi-weekly-reporter",
+        ],
     ),
     "growth": PlanResources(max_conversations=10_000),
     "scale": PlanResources(max_conversations=100_000),
@@ -98,7 +110,7 @@ class Settings(BaseSettings):
     debug: bool = True
     log_level: str = "INFO"
     api_prefix: str = "/api/v1"
-    admin_api_key: str = "change-me-admin-key"
+    admin_api_key: str = _DEFAULT_ADMIN_API_KEY
     hub_public_url: str = "http://localhost:8080"
     cors_origins: EnvList = ["http://localhost:3000"]
 
@@ -248,6 +260,43 @@ class Settings(BaseSettings):
     whatsapp_bridge_script: str = "/opt/hermes/scripts/whatsapp-bridge/bridge.js"
     whatsapp_session_path: str = "/opt/data/platforms/whatsapp/session"
 
+    # --------------------------------------------------------- user sessions
+    #: Signs session JWTs. Blank derives a key from ``admin_api_key``, so an
+    #: existing .env keeps working; set it to rotate sessions independently.
+    jwt_secret: str = ""
+    access_token_ttl_minutes: int = 30
+    refresh_token_ttl_days: int = 14
+    #: Password for the accounts seeded into an empty users table. Blank
+    #: generates one per account and logs it once, on a local install only.
+    auth_seed_password: str = ""
+    #: Also seed the demo owner and its tenant. ``None`` means local installs only.
+    auth_seed_demo: bool | None = None
+    otp_ttl_minutes: int = 10
+    otp_max_attempts: int = 5
+    #: No WhatsApp or email provider is wired up yet, so an OTP cannot truly be
+    #: delivered. ``None`` simulates on a local install and refuses elsewhere:
+    #: simulation returns the code to the caller, which outside a developer's
+    #: machine would let anyone sign in as anyone.
+    otp_simulate: bool | None = None
+    #: The code a simulated delivery hands back. Only ever used while ``otp_simulated``.
+    otp_demo_code: str = "246810"
+
+    # ---------------------------------------------------- social autopilot
+    #: Where generated post visuals are written. ``None`` means ``<data_root>/social-media``.
+    social_media_dir: Path | None = None
+    social_script_timeout_seconds: float = 90.0
+    #: Meta credentials for the ONE tenant named in ``meta_live_tenant``. Blank means
+    #: every tenant publishes to the sandbox, which records what would have been posted.
+    #: Per-tenant credentials are not wired yet, so no other tenant may use these.
+    meta_page_access_token: str = ""
+    meta_page_id: str = ""
+    meta_ig_user_id: str = ""
+    meta_live_tenant: str = ""
+    #: Public https base the visuals are served from, which Meta must be able to fetch.
+    social_public_base_url: str = ""
+    #: Optional. With it the visual generator asks an image model for the backdrop.
+    openai_api_key: str = ""
+
     # ------------------------------------------------------------ messaging
     messaging_webhook_secret: str = ""
     meta_verify_token: str = ""
@@ -279,6 +328,8 @@ class Settings(BaseSettings):
             self.archive_root = self.data_root / "archive"
         if self.skills_publish_dir is None:
             self.skills_publish_dir = self.data_root / "shared-skills"
+        if self.social_media_dir is None:
+            self.social_media_dir = self.data_root / "social-media"
         if self.nginx_sites_available is None:
             self.nginx_sites_available = self.data_root / "nginx" / "conf.d"
         if self.nginx_sites_enabled is None:
@@ -307,7 +358,42 @@ class Settings(BaseSettings):
                 "nginx_upstream_mode='loopback': a host nginx cannot resolve "
                 "Docker container names."
             )
+        if self.environment != "local":
+            # Each of these would be a sign-in bypass on a reachable deployment.
+            if self.otp_simulate:
+                raise ValueError(
+                    "otp_simulate returns login codes to the caller and is only "
+                    "allowed when environment='local'."
+                )
+            if not self.jwt_secret and self.admin_api_key == _DEFAULT_ADMIN_API_KEY:
+                raise ValueError(
+                    "Set ADMIN_API_KEY or JWT_SECRET: session tokens would "
+                    "otherwise be signed with a key published in the source."
+                )
         return self
+
+    # ------------------------------------------------------------- sessions
+    @property
+    def session_signing_key(self) -> str:
+        """The HS256 key for session JWTs, domain-separated from the admin key."""
+        if self.jwt_secret:
+            return self.jwt_secret
+        return hmac.new(
+            self.admin_api_key.encode("utf-8"), b"weblaud-session-v1", hashlib.sha256
+        ).hexdigest()
+
+    @property
+    def otp_simulated(self) -> bool:
+        return self.environment == "local" if self.otp_simulate is None else self.otp_simulate
+
+    @property
+    def seed_demo(self) -> bool:
+        return self.environment == "local" if self.auth_seed_demo is None else self.auth_seed_demo
+
+    @property
+    def secure_cookies(self) -> bool:
+        """Local stacks run on plain http, where a Secure cookie is never sent back."""
+        return self.environment != "local"
 
     # ------------------------------------------------------------- helpers
     def plan_for(self, plan: str) -> PlanResources:

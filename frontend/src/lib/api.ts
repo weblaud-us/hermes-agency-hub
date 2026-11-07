@@ -12,17 +12,26 @@ import {
   type TenantHealth,
   type TenantStatus,
 } from "./hub-types";
+import { discardBody, fetchMe, PERMISSIONS, refreshSession, type SessionUser } from "./auth";
 import { createMockHub } from "./mock-hub";
-import { TIERS, tierFromPlan, type ApiPlan } from "./provisioning";
+import { createLiveOps, type OpsClient } from "./ops-api";
+import { createMockOps } from "./ops-mock";
+import {
+  PACKAGE_FOR_TIER,
+  TIERS,
+  tierFromPlan,
+  type ApiPlan,
+  type BusinessMode,
+  type NicheTemplate,
+  type PackageTier,
+  type RegionPreset,
+} from "./provisioning";
 
 export * from "./hub-types";
 
-const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/+$/, "");
-const API_PREFIX = "/api/v1";
+/** Same-origin: the website forwards to the hub, carrying the session cookie. */
+const BASE = "/hub-api";
 const TENANT_SLOTS = Number(process.env.NEXT_PUBLIC_TENANT_SLOTS) || 20;
-const ADMIN_KEY_STORAGE = "hermes.admin-key";
-
-export const HUB_URL = API_URL;
 
 // ------------------------------------------------------------- hub wire shapes
 type SubscriptionStatus = "pending" | "provisioning" | "active" | "suspended" | "failed" | "archived";
@@ -43,6 +52,20 @@ interface ClientRead {
   config: Record<string, unknown>;
   synced_skills: string[];
   provisioned_at: string | null;
+  business_mode: BusinessMode;
+  niche_template: NicheTemplate;
+  package_tier: PackageTier;
+  region_preset: RegionPreset;
+  currency: string;
+  onboarding_stage: number;
+  baseline_metrics_json: {
+    monthly_inquiries: number;
+    conversion_rate: number;
+    avg_order_or_profit_value: number;
+    monthly_retainer_investment: number;
+  } | null;
+  autopilot_social: boolean;
+  brand_kit_json: { primary_color?: string } | null;
 }
 
 interface ClientList {
@@ -122,22 +145,29 @@ function errorFromBody(status: number, body: unknown): ApiError {
   return new ApiError(status, payload.error ?? `http_${status}`, message);
 }
 
-async function request<T>(
+export async function request<T>(
   path: string,
-  options: { method?: string; body?: unknown; key?: string; timeoutMs?: number } = {},
+  options: { method?: string; body?: unknown; timeoutMs?: number } = {},
 ): Promise<T> {
   const headers: Record<string, string> = {};
-  if (options.key) headers["X-API-Key"] = options.key;
   if (options.body !== undefined) headers["Content-Type"] = "application/json";
 
-  let response: Response;
-  try {
-    response = await fetch(`${API_URL}${path}`, {
+  const send = () =>
+    fetch(`${BASE}${path}`, {
       method: options.method ?? "GET",
       headers,
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
       signal: options.timeoutMs ? AbortSignal.timeout(options.timeoutMs) : undefined,
     });
+
+  let response: Response;
+  try {
+    response = await send();
+    // An access token is short-lived by design, so an expiry mid-page is routine.
+    if (response.status === 401 && (await refreshSession())) {
+      await discardBody(response);
+      response = await send();
+    }
   } catch {
     throw new ApiError(0, "network_error", "Could not reach the hub.");
   }
@@ -194,6 +224,22 @@ function tenantFromClient(
     secrets: secrets ?? { password: null, apiKey: null },
     monthlyRetainer: TIERS[tier].monthly,
     model: typeof client.config?.model === "string" ? client.config.model : null,
+    businessMode: client.business_mode,
+    nicheTemplate: client.niche_template,
+    packageTier: client.package_tier,
+    region: client.region_preset,
+    currency: client.currency,
+    onboardingStage: client.onboarding_stage,
+    baseline: client.baseline_metrics_json
+      ? {
+          monthlyInquiries: client.baseline_metrics_json.monthly_inquiries,
+          conversionRate: client.baseline_metrics_json.conversion_rate,
+          avgOrderOrProfitValue: client.baseline_metrics_json.avg_order_or_profit_value,
+          monthlyRetainerInvestment: client.baseline_metrics_json.monthly_retainer_investment,
+        }
+      : null,
+    autopilotSocial: client.autopilot_social,
+    brandPrimary: client.brand_kit_json?.primary_color ?? null,
   };
 }
 
@@ -210,7 +256,7 @@ function probeFromWire(probe: PortProbe | null): ServiceProbe | null {
 
 async function probeHub(): Promise<HubHealth> {
   const started = performance.now();
-  const body = await request<{ status: string; docker: boolean }>("/healthz", { timeoutMs: 4000 });
+  const body = await request<{ status: string; docker: boolean }>("/healthz", { timeoutMs: 6000 });
   return {
     ok: body.status === "ok",
     latencyMs: Math.round(performance.now() - started),
@@ -219,7 +265,7 @@ async function probeHub(): Promise<HubHealth> {
 }
 
 // ------------------------------------------------------------------- live client
-function createLiveHub(key: string): HubClient {
+function createLiveHub(): HubClient {
   /**
    * The hub returns a tenant's password and bearer key once, at onboarding. Held
    * in memory so the row actions work for the rest of this page session, and
@@ -242,9 +288,9 @@ function createLiveHub(key: string): HubClient {
     async fleet(): Promise<FleetSnapshot> {
       const [health, list, stats] = await Promise.all([
         probeHub(),
-        request<ClientList>(`${API_PREFIX}/clients?limit=200`, { key, timeoutMs: READ_TIMEOUT_MS }),
+        request<ClientList>(`/clients?limit=200`, { timeoutMs: READ_TIMEOUT_MS }),
         // Stats also ask Docker. A daemon outage should not blank the tenant list.
-        request<HubStats>(`${API_PREFIX}/clients/stats`, { key, timeoutMs: READ_TIMEOUT_MS }).catch(
+        request<HubStats>(`/clients/stats`, { timeoutMs: READ_TIMEOUT_MS }).catch(
           () => null,
         ),
       ]);
@@ -283,15 +329,31 @@ function createLiveHub(key: string): HubClient {
 
     async onboard(input: OnboardInput): Promise<OnboardResult> {
       // No timeout: onboarding is synchronous and includes the tenant health probe.
-      const body = await request<OnboardResponse>(`${API_PREFIX}/clients/onboard`, {
+      const body = await request<OnboardResponse>(`/clients/onboard`, {
         method: "POST",
-        key,
         body: {
           company_name: input.companyName,
           subdomain: input.subdomain,
           openrouter_api_key: input.openRouterKey,
           contact_email: input.contactEmail,
-          plan: input.plan,
+          package_tier: PACKAGE_FOR_TIER[input.tier],
+          business_mode: input.businessMode,
+          niche_template: input.nicheTemplate,
+          region_preset: input.region,
+          currency: input.currency,
+          baseline_metrics: input.baseline
+            ? {
+                monthly_inquiries: input.baseline.monthlyInquiries,
+                conversion_rate: input.baseline.conversionRate,
+                avg_order_or_profit_value: input.baseline.avgOrderOrProfitValue,
+                monthly_retainer_investment: input.baseline.monthlyRetainerInvestment,
+              }
+            : null,
+          autopilot_social: input.autopilotSocial,
+          brand_kit: {
+            primary_color: input.brandPrimary,
+            logo_text: input.companyName.trim().toUpperCase().slice(0, 24),
+          },
           config: { model: input.model, requested_skills: input.skills },
         },
       });
@@ -318,16 +380,16 @@ function createLiveHub(key: string): HubClient {
       // No revoke_existing: minting a new link must never invalidate one the
       // business owner may already have open or saved.
       const body = await request<PortalTokenResponse>(
-        `${API_PREFIX}/clients/${encodeURIComponent(tenantId)}/portal-token`,
-        { method: "POST", key, body: {}, timeoutMs: READ_TIMEOUT_MS },
+        `/clients/${encodeURIComponent(tenantId)}/portal-token`,
+        { method: "POST", body: {}, timeoutMs: READ_TIMEOUT_MS },
       );
       return { token: body.token, portalUrl: body.portal_url, expiresAt: hubTimestamp(body.expires_at) ?? body.expires_at };
     },
 
     async teardown(tenantId) {
       const body = await request<TeardownResponse>(
-        `${API_PREFIX}/clients/${encodeURIComponent(tenantId)}?archive=true`,
-        { method: "DELETE", key },
+        `/clients/${encodeURIComponent(tenantId)}?archive=true`,
+        { method: "DELETE" },
       );
       sessionSecrets.delete(tenantId);
       return {
@@ -343,16 +405,16 @@ function createLiveHub(key: string): HubClient {
 
     async logs(tenantId, tail) {
       const body = await request<{ lines: string[] }>(
-        `${API_PREFIX}/clients/${encodeURIComponent(tenantId)}/logs?tail=${tail}`,
-        { key, timeoutMs: READ_TIMEOUT_MS },
+        `/clients/${encodeURIComponent(tenantId)}/logs?tail=${tail}`,
+        { timeoutMs: READ_TIMEOUT_MS },
       );
       return body.lines;
     },
 
     async tenantHealth(tenantId): Promise<TenantHealth> {
       const body = await request<ClientHealth>(
-        `${API_PREFIX}/clients/${encodeURIComponent(tenantId)}/health`,
-        { key, timeoutMs: HEALTH_TIMEOUT_MS },
+        `/clients/${encodeURIComponent(tenantId)}/health`,
+        { timeoutMs: HEALTH_TIMEOUT_MS },
       );
       return {
         containerState: body.container_state,
@@ -368,54 +430,34 @@ function createLiveHub(key: string): HubClient {
 }
 
 // -------------------------------------------------------------------- connection
-export type MockReason = "no-url" | "offline" | "no-key" | "key-rejected";
-
 export type HubConnection =
-  | { hub: HubClient; mode: "live" }
-  | { hub: HubClient; mode: "mock"; reason: MockReason };
+  | { mode: "live"; hub: HubClient; ops: OpsClient; user: SessionUser }
+  | { mode: "mock"; hub: HubClient; ops: OpsClient; user: SessionUser }
+  | { mode: "signin" };
 
-export function loadAdminKey(): string | null {
-  try {
-    return sessionStorage.getItem(ADMIN_KEY_STORAGE);
-  } catch {
-    return null;
-  }
-}
-
-export function saveAdminKey(key: string | null): void {
-  try {
-    if (key) sessionStorage.setItem(ADMIN_KEY_STORAGE, key);
-    else sessionStorage.removeItem(ADMIN_KEY_STORAGE);
-  } catch {
-    // Storage blocked: the key simply lasts until this page reloads.
-  }
-}
+/** Everything is open in the sample console, which has nothing real behind it. */
+const PREVIEW_USER: SessionUser = {
+  id: "preview",
+  email: "preview@weblaud.com",
+  fullName: "Preview",
+  role: "SUPER_ADMIN",
+  clientId: null,
+  clientSlug: null,
+  permissions: Object.values(PERMISSIONS),
+};
 
 /**
- * Decides once, at connect time, whether the console is live or on mock data.
- * Mock is only ever a starting state: once live, a failed call surfaces as an
- * error, so a dropped connection can never produce fake credentials.
+ * Decides once, at connect time, whether the console is live or on sample data.
+ * Sample data appears only when the hub cannot answer at all. Once live, a failed
+ * call surfaces as an error, so a dropped connection can never produce fake credentials.
  */
-export async function connectHub(key: string | null): Promise<HubConnection> {
-  const mock = (reason: MockReason): HubConnection => ({ hub: createMockHub(), mode: "mock", reason });
-
-  if (!API_URL) return mock("no-url");
+export async function connectHub(): Promise<HubConnection> {
+  let user: SessionUser | null;
   try {
-    await probeHub();
+    user = await fetchMe();
   } catch {
-    return mock("offline");
+    return { mode: "mock", hub: createMockHub(), ops: createMockOps(), user: PREVIEW_USER };
   }
-  if (!key) return mock("no-key");
-
-  try {
-    await request<ClientList>(`${API_PREFIX}/clients?limit=1`, { key, timeoutMs: READ_TIMEOUT_MS });
-  } catch (error) {
-    if (error instanceof ApiError && error.status === 401) {
-      saveAdminKey(null);
-      return mock("key-rejected");
-    }
-    return mock("offline");
-  }
-  saveAdminKey(key);
-  return { hub: createLiveHub(key), mode: "live" };
+  if (!user) return { mode: "signin" };
+  return { mode: "live", hub: createLiveHub(), ops: createLiveOps(), user };
 }

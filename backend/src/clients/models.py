@@ -9,6 +9,7 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     DateTime,
     Enum as SAEnum,
     Float,
@@ -38,6 +39,47 @@ class ClientPlan(str, enum.Enum):
     STARTER = "starter"
     GROWTH = "growth"
     SCALE = "scale"
+
+
+class BusinessMode(str, enum.Enum):
+    GENERAL = "general"      # lead gen, appointments, service enquiries
+    ECOMMERCE = "ecommerce"  # catalog, order desk, COD confirmation, couriers
+
+
+class NicheTemplate(str, enum.Enum):
+    DENTAL_CLINIC = "dental_clinic"
+    BEAUTY_SALON = "beauty_salon"
+    RESTAURANT = "restaurant"
+    TRAVEL_AGENCY = "travel_agency"
+    ECOMMERCE_STORE = "ecommerce_store"
+    CUSTOM = "custom"
+
+
+class PackageTier(str, enum.Enum):
+    """What Weblaud sells. Maps onto a :class:`ClientPlan`, which is what gets resourced."""
+
+    PRESENCE = "presence"
+    GROWTH = "growth"
+    SCALE = "scale"
+
+
+class RegionPreset(str, enum.Enum):
+    BD = "bd"
+    GLOBAL = "global"
+
+
+PLAN_FOR_TIER = {
+    PackageTier.PRESENCE: ClientPlan.STARTER,
+    PackageTier.GROWTH: ClientPlan.GROWTH,
+    PackageTier.SCALE: ClientPlan.SCALE,
+}
+TIER_FOR_PLAN = {plan: tier for tier, plan in PLAN_FOR_TIER.items()}
+
+#: 1 Discovery, 2 Knowledge Base, 3 Channels, 4 Brand Kit, 5 Instance Live,
+#: 6 Shadow Week QA, 7 Autonomous Live.
+ONBOARDING_INSTANCE_LIVE = 5
+ONBOARDING_SHADOW_WEEK = 6
+ONBOARDING_AUTONOMOUS = 7
 
 
 class AuditStatus(str, enum.Enum):
@@ -75,6 +117,38 @@ class Client(Base):
         index=True,
     )
     status_detail: Mapped[str | None] = mapped_column(Text, default=None)
+
+    # --- business profile ----------------------------------------------
+    business_mode: Mapped[BusinessMode] = mapped_column(
+        SAEnum(BusinessMode, name="business_mode", native_enum=False),
+        default=BusinessMode.GENERAL,
+    )
+    niche_template: Mapped[NicheTemplate] = mapped_column(
+        SAEnum(NicheTemplate, name="niche_template", native_enum=False),
+        default=NicheTemplate.CUSTOM,
+    )
+    package_tier: Mapped[PackageTier] = mapped_column(
+        SAEnum(PackageTier, name="package_tier", native_enum=False),
+        default=PackageTier.PRESENCE,
+    )
+    region_preset: Mapped[RegionPreset] = mapped_column(
+        SAEnum(RegionPreset, name="region_preset", native_enum=False),
+        default=RegionPreset.GLOBAL,
+    )
+    #: ISO 4217. Always BDT for the bd preset; USD, EUR or GBP for global.
+    currency: Mapped[str] = mapped_column(String(3), default="USD")
+    onboarding_stage: Mapped[int] = mapped_column(Integer, default=1)
+    #: What the business looked like before onboarding, the base of its ROI.
+    #: Null until somebody supplies it; see ``ops.roi``.
+    baseline_metrics_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    #: Whether the social autopilot publishes on its own (True) or waits for the
+    #: owner's one-tap approval (False). Zero-touch is the default.
+    autopilot_social: Mapped[bool] = mapped_column(Boolean, default=True)
+    #: ``{primary_color, accent_color, logo_text, contact_cta, website_url}``. Null until
+    #: set; ``ops.social.effective_brand_kit`` fills the gaps with defaults.
+    brand_kit_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    #: Owner overrides of the guardrail lanes, ``{item_key: lane}``.
+    guardrails_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
     # --- billing -------------------------------------------------------
     stripe_customer_id: Mapped[str | None] = mapped_column(String(64), index=True)

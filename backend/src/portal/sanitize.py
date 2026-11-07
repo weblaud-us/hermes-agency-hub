@@ -167,3 +167,37 @@ def validate_business_rule(text: str) -> str:
             "about your business. Describe the policy, price or procedure instead."
         )
     return cleaned
+
+
+def validate_business_field(text: str, *, label: str, max_length: int) -> str:
+    """Like :func:`validate_business_rule`, for a named form field that may be empty.
+
+    The business setup form is compiled into ``SOUL.md`` and ``MEMORY.md``, so each
+    field gets the same screening as a memory rule, with its own length cap and a
+    message that names the field the owner is looking at.
+    """
+    normalised = unicodedata.normalize("NFKC", text)
+    for char in normalised:
+        if char not in "\r\n\t" and unicodedata.category(char) in {"Cc", "Cf"}:
+            raise PortalError(422, "business_field_rejected", f"{label} contains characters that cannot be saved.")
+    cleaned = " ".join(normalised.split())
+    if not cleaned:
+        return ""
+    if len(cleaned) > max_length:
+        raise PortalError(422, "business_field_rejected", f"Keep {label} under {max_length} characters.")
+    if _ENTRY_SEPARATOR in cleaned:
+        raise PortalError(
+            422, "business_field_rejected", f"{label} cannot contain the {_ENTRY_SEPARATOR} character."
+        )
+    if _MARKUP.search(cleaned):
+        raise PortalError(
+            422, "business_field_rejected", f"{label} is plain text. Remove any formatting or angle brackets."
+        )
+    if any(pattern.search(cleaned) for pattern in _INJECTION_PATTERNS):
+        raise PortalError(
+            422,
+            "business_field_rejected",
+            f"{label} reads like an instruction to the Coordinator rather than a fact about "
+            "your business. Describe the policy, price or procedure instead.",
+        )
+    return cleaned

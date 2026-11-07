@@ -28,6 +28,22 @@ their messages, learns their business and reports back, with each one in its own
 | **Built on** | [Hermes Agent](https://github.com/NousResearch/hermes-agent) by Nous Research, the AI agent that runs inside each container |
 | **Where it stands** | The control plane and client portal work and are tested. Some things the website shows are not built yet. [Slide 17](#slide-17-what-isnt-finished) lists them |
 
+### Local demo sign-ins
+
+On a local install (`ENVIRONMENT=local`) with no `AUTH_SEED_PASSWORD`, an empty database is seeded with these accounts. They are written in the source, so they are **never** created anywhere else: staging and production need `AUTH_SEED_PASSWORD` or no accounts are made.
+
+| Where | Email | Password | Role |
+|---|---|---|---|
+| `/login`, Agency Console | `ishtiaq@weblaud.com` | `WeblaudAdmin!2026` | Super Admin |
+| | `sakib@weblaud.com` | `WeblaudAdmin!2026` | Super Admin |
+| | `jubayed@weblaud.com` | `WeblaudSales!2026` | Sales Ops |
+| `/login`, SMB Client Portal | `owner@suvana.com` (subdomain `suvana`) | `ClientPortal!2026` | Owner, online store |
+| | `owner@apex-dental.com` (subdomain `apex-dental`) | `ClientPortal!2026` | Owner, dental clinic |
+
+A client owner can also use the 6-digit magic code, which is `246810` while delivery is simulated. If the database already has users, nothing is re-seeded and their old passwords stay.
+
+The role pills on the console login only fill in passwords when the website is built with `NEXT_PUBLIC_DEMO_LOGINS=true` (the start script sets it). Without it they pick the account and you type the password.
+
 ### How this deck is organised
 
 | Act | Question it answers | Slides |
@@ -114,8 +130,8 @@ There are four people in this story:
 
 | Who | What they want | Where they go | How they get in |
 |---|---|---|---|
-| **The agency team** | Run every client from one place | Console at `/admin` | Shared admin key |
-| **The business owner** | See what the assistant did, and correct it | Portal at `/portal/<client>` | Private link from the agency |
+| **The agency team** | Run every client from one place | Console at `/admin` | Email and password, with a role |
+| **The business owner** | See results, approve work, and correct the assistant | Portal at `/portal/<client>` | Password, one-time code, or private link from the agency |
 | **The technical contact** | Full control of this one assistant | Dashboard at `<client>.<domain>` | Username and password |
 | **The customer** | An answer | WhatsApp, Telegram or Slack | Just sends a message, and never sees any of this |
 
@@ -256,8 +272,8 @@ flowchart TB
 
     openrouter["OpenRouter<br/>AI models"]
 
-    team -- "X-API-Key" --> hub
-    team -- "pages" --> web
+    team -- "session cookie" --> web
+    web -- "/hub-api, team routes" --> hub
     owner -- "portal token" --> web
     web -- "/portal-api, portal paths only" --> hub
     hub --> pg
@@ -286,16 +302,26 @@ flowchart TB
 
 **Two Docker networks:** `hermes-internal` carries the hub, website and database. `hermes-clients` carries the hub, nginx and all tenants. The website isn't on the tenant network at all, and tenants can't reach the database.
 
-### Slide 10: Four ways in
+### Slide 10: Five ways in
 
 Every route into the system has its own credentials and its own limits.
 
 | Door | Who uses it | Path | Credential | Can reach |
 |---|---|---|---|---|
-| **Admin API and console** | Agency | Browser → `hub:8080/api/v1` | `X-API-Key` | Every client |
-| **Client portal** | Business owner | Browser → `web:3000/portal-api` → hub | Signed token for one client | That client's portal routes only |
+| **Agency console** | Agency | Browser → `web:3000/hub-api` → hub | Session cookie | What the person's role allows |
+| **Admin API** | Scripts | Program → `hub:8080/api/v1` | `X-API-Key` | Everything, as Super Admin |
+| **Client portal** | Business owner | Browser → `web:3000/portal-api` → hub | Session cookie, or a signed token for one client | That client's portal routes only |
 | **Tenant dashboard** | Technical contact | Browser → nginx → tenant `:9119` | Username and password | That tenant |
 | **Tenant API** | Client's software | Program → nginx `/v1/` → tenant `:8642` | Bearer token | That tenant. OpenAI-compatible, and not white-labelled |
+
+Session cookies are HttpOnly and SameSite=Lax, and are checked against the user's row on every request, so signing out or changing a role takes effect at once. The route guard in `frontend/src/proxy.ts` only chooses where to send people. The hub makes every access decision, using the matrix in `backend/src/auth/permissions.py`:
+
+| Role | Can reach | Cannot |
+|---|---|---|
+| `SUPER_ADMIN` | Everything | |
+| `GROWTH_OPS` | Clients, Shadow-Week QA, skills, ROI, and looking at any client's portal | Provision or terminate containers, change server or billing fields, decide for an owner |
+| `SALES_OPS` | Prospect CRM, audit tracker, stand-up, onboarding drafts | Read the fleet, logs, secrets or any client's portal |
+| `CLIENT_OWNER` | Their own portal | Anything else. Another client's portal answers `403` |
 
 Portal tokens are HS256 JWTs signed with a key derived from that client's own secret. A token for one client can't verify against another, even with a forged subject, and rotating the secret revokes all of that client's links at once.
 
@@ -457,7 +483,7 @@ These decisions look odd until you know why they exist. Read this slide before c
 | ✅ | Audit trail | Lifecycle and portal actions, per client |
 | ✅ | Health report | Container state plus a live probe of both services |
 | ✅ | List, search, filter, stats, update, logs | Through the API |
-| 🟡 | Plans (Starter, Growth, Scale) | Starter is given only `lead-qualification`, but every tenant also mounts the whole library read-only, so this doesn't yet restrict what a Starter assistant can find |
+| 🟡 | Packages (Presence, Growth, Scale) | Each package sets a plan and a list of skills, and e-commerce skills are disabled for general businesses. Every tenant still mounts the whole library read-only, so a Presence assistant can still find the higher-tier skills |
 | 🟡 | Changing a client's plan | Updates the record, but doesn't resize a running container. Docker can't do that in place |
 
 #### Agency console
@@ -478,6 +504,9 @@ These decisions look odd until you know why they exist. Read this slide before c
 
 | | Feature | Notes |
 |---|---|---|
+| ✅ | Five tabs | Overview, Social Autopilot, ROI & Growth, Guardrails & Approvals, Channels & Memory |
+| ✅ | Social autopilot | Draws a branded 1080 px post with `generate_social_visual.py`, publishes with `meta_publisher.py`, and answers comments with a public reply plus a DM handoff. Zero-touch or one-tap approval, and Shadow Week still sends posts through Weblaud QA first |
+| 🟡 | Social publishing to Meta | With no Meta credentials it runs in a labelled **sandbox**: nothing is posted. Live publishing is wired for one tenant (`META_LIVE_TENANT`) and has not been run against a real page. Reach is shown as unknown, and incoming live comments are not received yet |
 | ✅ | White-label overview | Status, 30-day activity, estimated time saved |
 | ✅ | Channel status | WhatsApp, Telegram, Slack and web widget, with masked handles and 24-hour volume |
 | ✅ | Approved senders | Change who may message the assistant, per channel |
@@ -550,8 +579,9 @@ The marketing site and console describe where the product is heading, and in pla
 | "Dedicated Client VPS" | Sample data only. The hub runs every tenant on its own host |
 | Different resources per tier (1 GB to 4 GB) | Every plan gets 2 GB and 1 vCPU |
 | Choosing an AI model when provisioning | No file the tenant reads contains the choice, so it runs the image's default model |
-| "Daily Executive Briefing" skill | Not in `shared-skills/`. Only two skills exist. Scheduled reports do work |
-| Choosing individual skills in the form | Skills are set by plan |
+| Approving an item in the portal | Records the decision and audits it. **It doesn't yet tell the agent to act**, because the agent has no route for receiving that instruction, and agents can't yet add drafts to the queue either |
+| Monthly ROI figures and workspace rows | Entered by the team or through the API. Nothing feeds them automatically from the agent yet |
+| WhatsApp and email one-time codes | Simulated on a local install. Elsewhere the route answers `503` |
 | Billing | Stripe fields and settings exist, but no route uses them |
 | Inbound webhooks: Shopify, CRM, MCP Inspector | The animated homepage graph is labelled as simulated, and `webhooks/` is empty |
 
@@ -585,10 +615,15 @@ The marketing site and console describe where the product is heading, and in pla
 | Open | To see | Log in with |
 |---|---|---|
 | http://localhost:3000 | The marketing site | Nothing |
-| http://localhost:3000/admin | The agency console | Connect hub, then the admin key |
+| http://localhost:3000/login | The agency console | `sakib@weblaud.com` and the printed password |
+| http://localhost:3000/login?tab=client | The demo owner's portal, with sample figures | `owner@suvana.com` and the printed password, or a one-time code |
 | http://demo.localhost | The demo client's dashboard | `admin` and the printed password |
 | The printed portal link | The demo client's portal | The link is the login |
 | http://localhost:8080/docs | The hub's interactive API docs | `X-API-Key` |
+
+**First sign-in.** When the users table is empty, the hub creates the agency team and, on a local install, the demo owner. `AUTH_SEED_PASSWORD` sets their password. Left blank on a local install, a password per account is generated and logged once: `docker compose logs hub | findstr Seeded`. Outside a local install it is required, and no accounts are created without it. Change it after signing in, from the profile menu. If a generated password is lost, reset it with the admin key: `PATCH /api/v1/auth/users/{id}`.
+
+**One-time codes are simulated.** No WhatsApp or email provider is connected, so a local install shows the code on screen, and any other environment answers `503` rather than handing codes to whoever asks.
 
 **Want to look without Docker?** The console and portal fall back to labelled sample data. Run `npm ci` and `npm run dev` in `frontend/` (Node 20 or newer), then open `/admin` and `/portal/suvana`.
 
@@ -636,7 +671,27 @@ On a Linux host, create the data root first with `sudo mkdir -p /srv/hermes-mult
 
 ### Admin API
 
-Every `/api/v1` route requires `X-API-Key: $ADMIN_API_KEY`, except the client portal, which has its own per-client token.
+Every `/api/v1` route accepts `X-API-Key: $ADMIN_API_KEY`, which acts as Super Admin, or a person's session with the role the route needs. The client portal also accepts its own per-client token, and `/auth/login`, `/auth/magic-otp`, `/auth/refresh` and `/auth/logout` are open.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/v1/auth/login` | Email and password. Sets HttpOnly cookies and returns the tokens, profile and permissions |
+| `POST` | `/api/v1/auth/magic-otp` | Without `code`, requests a six-digit code. With it, signs in |
+| `POST` | `/api/v1/auth/refresh`, `/auth/logout`, `/auth/change-password` | Renew, end, or re-secure a session |
+| `GET` | `/api/v1/auth/me` | The signed-in user |
+| `GET` `POST` `PATCH` | `/api/v1/auth/users` | Manage accounts. This is how a `GROWTH_OPS` account gets created |
+| `GET` | `/api/v1/qa/queue` | Drafts waiting on the team |
+| `POST` | `/api/v1/clients/{id}/approvals` | Queue a draft. Before step 7 it goes to QA, then to the owner |
+| `POST` | `/api/v1/clients/{id}/approvals/{item}/qa`, `/revise` | Forward, return, escalate or correct a draft |
+| `GET` `PUT` | `/api/v1/clients/{id}/roi`, `/roi/{YYYY-MM}` | Read the report, or record a month's results |
+| `POST` `PATCH` | `/api/v1/clients/{id}/workspace-records` | Rows in the owner's daily workspace |
+| `GET` `POST` `PATCH` `DELETE` | `/api/v1/crm/prospects` | The pipeline, with its priority score |
+| `PUT` | `/api/v1/crm/prospects/{id}/draft` | A client onboarding draft, which provisioning can start from |
+| `GET` `PUT` | `/api/v1/crm/standup` | The team's daily targets |
+| `GET` `PATCH` | `/api/v1/kits`, `GET /api/v1/skills` | Starter kits and the skill library |
+| `GET` | `/api/v1/portal/{client}/profile`, `/roi`, `/approvals`, `/guardrails`, `/workspace` | The owner's growth views |
+| `POST` | `/api/v1/portal/{client}/approvals/{item}/decide` | Approve, ask for an edit, or hold |
+| `PUT` | `/api/v1/portal/{client}/guardrails/{key}` | Move a routine item between Owner Approves and Automatic |
 
 | Method | Path | Purpose |
 |---|---|---|

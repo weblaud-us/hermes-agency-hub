@@ -12,6 +12,8 @@ import {
   Rocket,
   ShieldCheck,
   TerminalSquare,
+  Building2,
+  ShoppingBag,
   X,
 } from "lucide-react";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
@@ -19,28 +21,41 @@ import { CopyButton } from "@/components/ui/CopyButton";
 import { Dialog } from "@/components/ui/Dialog";
 import { SecretInput } from "@/components/ui/SecretInput";
 import { Segmented } from "@/components/ui/Segmented";
+import { Switch } from "@/components/ui/Switch";
 import { ApiError, type HubClient, type OnboardResult } from "@/lib/api";
+import type { OpsClient, Prospect, StarterKit } from "@/lib/ops-api";
 import { SPRING, riseIn, staggerContainer } from "@/lib/motion";
 import {
   BASE_DOMAIN,
+  CURRENCY_SYMBOLS,
+  DEFAULT_BRAND_PRIMARY,
+  HEX_COLOR_PATTERN,
   LLM_MODELS,
+  NICHE_OPTIONS,
+  REGION_CURRENCIES,
   SHARED_SKILLS,
   TIERS,
+  TIER_FOR_PACKAGE,
   TIER_ORDER,
+  baselineFromForm,
   buildInstallerCommand,
   provisionStages,
   validateProvisionForm,
   type ProvisionField,
+  type BusinessMode,
+  type NicheTemplate,
   type ProvisionForm,
+  type RegionPreset,
   type TierId,
 } from "@/lib/provisioning";
-import { cn, delay, slugify } from "@/lib/utils";
+import { cn, delay, formatCurrency, slugify } from "@/lib/utils";
 
 export type ProvisionTab = "cluster" | "installer";
 
 interface ProvisionModalProps {
   open: boolean;
   hub: HubClient;
+  ops: OpsClient;
   initialTab: ProvisionTab;
   initialTier: TierId;
   onClose: () => void;
@@ -60,7 +75,14 @@ const FIELD_LABELS: Record<ProvisionField, string> = {
   subdomain: "Subdomain",
   openRouterKey: "OpenRouter API key",
   sslEmail: "Admin SSL email",
+  baseline: "Baseline ROI metrics",
+  brandPrimary: "Brand primary colour",
 };
+
+function skillsForMode(selected: string[], mode: BusinessMode): string[] {
+  const allowed = new Set(SHARED_SKILLS.filter((skill) => mode === "ecommerce" || !skill.ecommerceOnly).map((skill) => skill.id));
+  return selected.filter((id) => allowed.has(id));
+}
 
 // ------------------------------------------------------------------- form parts
 function Field({
@@ -108,7 +130,7 @@ function TierPicker({ value, onChange }: { value: TierId; onChange: (tier: TierI
   const name = useId();
   return (
     <fieldset>
-      <legend className="mb-1.5 text-sm font-medium text-ink-2">Package tier and resource preset</legend>
+      <legend className="mb-1.5 text-sm font-medium text-ink-2">Weblaud package</legend>
       <div className="grid gap-2 sm:grid-cols-3">
         {TIER_ORDER.map((id) => {
           const tier = TIERS[id];
@@ -129,15 +151,50 @@ function TierPicker({ value, onChange }: { value: TierId; onChange: (tier: TierI
                 onChange={() => onChange(id)}
                 className="sr-only"
               />
-              <span className="text-sm font-semibold text-ink">{id === "enterprise" ? "Enterprise" : tier.label}</span>
-              <span className="mt-0.5 font-mono text-[11px] tabular-nums text-ink-3">
-                {tier.memory} / {tier.cpus} vCPU
+              <span className="text-sm font-semibold text-ink">{tier.name}</span>
+              <span className="mt-0.5 font-mono text-[11px] tabular-nums text-ink-2">
+                {formatCurrency(tier.monthly)}/mo
+              </span>
+              <span className="font-mono text-[11px] tabular-nums text-ink-3">
+                + {formatCurrency(tier.setup)} setup · {tier.memory} / {tier.cpus} vCPU
               </span>
             </label>
           );
         })}
       </div>
     </fieldset>
+  );
+}
+
+function ChoiceCard({
+  name,
+  selected,
+  onSelect,
+  icon,
+  title,
+  body,
+}: {
+  name: string;
+  selected: boolean;
+  onSelect: () => void;
+  icon?: ReactNode;
+  title: string;
+  body: string;
+}) {
+  return (
+    <label
+      className={cn(
+        "relative flex min-h-16 cursor-pointer flex-col justify-center rounded-xl border px-3 py-2 transition-colors has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-signal",
+        selected ? "border-signal/50 bg-signal/7" : "border-white/10 hover:border-white/20",
+      )}
+    >
+      <input type="radio" name={name} checked={selected} onChange={onSelect} className="sr-only" />
+      <span className="flex items-center gap-1.5 text-sm font-semibold text-ink">
+        {icon}
+        {title}
+      </span>
+      <span className="mt-0.5 text-[11px] leading-snug text-ink-3">{body}</span>
+    </label>
   );
 }
 
@@ -467,7 +524,7 @@ function InstallerPanel({ command, ready }: { command: string; ready: boolean })
 }
 
 // ------------------------------------------------------------------------- modal
-export function ProvisionModal({ open, hub, initialTab, initialTier, onClose, onProvisioned }: ProvisionModalProps) {
+export function ProvisionModal({ open, hub, ops, initialTab, initialTier, onClose, onProvisioned }: ProvisionModalProps) {
   const [tab, setTab] = useState<ProvisionTab>(initialTab);
   const [phase, setPhase] = useState<Phase>({ name: "form" });
   const [form, setForm] = useState<ProvisionForm>({
@@ -477,8 +534,20 @@ export function ProvisionModal({ open, hub, initialTab, initialTier, onClose, on
     model: LLM_MODELS[0].id,
     openRouterKey: "",
     sslEmail: "",
-    skills: SHARED_SKILLS.map((skill) => skill.id),
+    skills: skillsForMode(SHARED_SKILLS.map((skill) => skill.id), "general"),
+    businessMode: "general",
+    nicheTemplate: "custom",
+    region: "global",
+    currency: "USD",
+    baselineInquiries: "",
+    baselineConversion: "",
+    baselineValue: "",
+    baselineRetainer: "",
+    brandPrimary: DEFAULT_BRAND_PRIMARY,
+    autopilotSocial: true,
   });
+  const [kits, setKits] = useState<StarterKit[]>([]);
+  const [drafts, setDrafts] = useState<Prospect[]>([]);
   const [subdomainEdited, setSubdomainEdited] = useState(false);
   const [touched, setTouched] = useState<Partial<Record<ProvisionField, boolean>>>({});
   const [summaryFields, setSummaryFields] = useState<ProvisionField[]>([]);
@@ -490,7 +559,13 @@ export function ProvisionModal({ open, hub, initialTab, initialTier, onClose, on
     model: `${baseId}-model`,
     openRouterKey: `${baseId}-key`,
     sslEmail: `${baseId}-email`,
+    baseline: `${baseId}-baseline`,
+    brandPrimary: `${baseId}-brand`,
+    draft: `${baseId}-draft`,
+    kit: `${baseId}-kit`,
+    currency: `${baseId}-currency`,
   };
+  const radioGroup = `${baseId}-choice`;
 
   const isCluster = tab === "cluster";
   const errors = validateProvisionForm(form, { requireKey: isCluster });
@@ -510,6 +585,64 @@ export function ProvisionModal({ open, hub, initialTab, initialTier, onClose, on
     if (summaryFields.length > 0) summaryRef.current?.focus();
   }, [summaryFields]);
 
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    // Conveniences: provisioning works without them, so a failure only hides the picker.
+    ops.kits().then((next) => {
+      if (!cancelled) setKits(next);
+    }, () => undefined);
+    ops.drafts().then((next) => {
+      if (!cancelled) setDrafts(next);
+    }, () => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [open, ops]);
+
+  function chooseMode(mode: BusinessMode) {
+    setForm((current) => ({ ...current, businessMode: mode, skills: skillsForMode(current.skills, mode) }));
+  }
+
+  function chooseKit(niche: NicheTemplate) {
+    const kit = kits.find((row) => row.key === niche);
+    const option = NICHE_OPTIONS.find((row) => row.value === niche);
+    const mode = kit?.businessMode ?? option?.mode ?? "general";
+    setForm((current) => ({
+      ...current,
+      nicheTemplate: niche,
+      businessMode: mode,
+      skills: skillsForMode(kit ? kit.skills : SHARED_SKILLS.map((skill) => skill.id), mode),
+    }));
+  }
+
+  function chooseRegion(region: RegionPreset) {
+    setForm((current) => ({ ...current, region, currency: REGION_CURRENCIES[region][0] }));
+  }
+
+  function applyDraft(prospectId: string) {
+    const draft = drafts.find((row) => row.id === prospectId)?.draft;
+    if (!draft) return;
+    const kit = kits.find((row) => row.key === draft.nicheTemplate);
+    setSubdomainEdited(false);
+    setForm((current) => ({
+      ...current,
+      companyName: draft.companyName,
+      subdomain: slugify(draft.companyName),
+      sslEmail: draft.contactEmail ?? current.sslEmail,
+      businessMode: draft.businessMode,
+      nicheTemplate: draft.nicheTemplate,
+      tier: TIER_FOR_PACKAGE[draft.packageTier],
+      region: draft.region,
+      currency: draft.currency ?? REGION_CURRENCIES[draft.region][0],
+      skills: skillsForMode(kit ? kit.skills : SHARED_SKILLS.map((skill) => skill.id), draft.businessMode),
+      baselineInquiries: draft.baseline ? String(draft.baseline.monthlyInquiries) : "",
+      baselineConversion: draft.baseline ? String(draft.baseline.conversionRate) : "",
+      baselineValue: draft.baseline ? String(draft.baseline.avgOrderOrProfitValue) : "",
+      baselineRetainer: draft.baseline ? String(draft.baseline.monthlyRetainerInvestment) : "",
+    }));
+  }
+
   function update<K extends keyof ProvisionForm>(key: K, value: ProvisionForm[K]) {
     setForm((current) => ({ ...current, [key]: value }));
   }
@@ -526,7 +659,7 @@ export function ProvisionModal({ open, hub, initialTab, initialTier, onClose, on
     return touched[field] ? errors[field] : undefined;
   }
 
-  function fieldProps(field: ProvisionField) {
+  function fieldProps(field: Exclude<ProvisionField, "baseline">) {
     const error = fieldError(field);
     return {
       id: ids[field],
@@ -541,7 +674,7 @@ export function ProvisionModal({ open, hub, initialTab, initialTier, onClose, on
       setSummaryFields([]);
       return true;
     }
-    setTouched({ companyName: true, subdomain: true, openRouterKey: true, sslEmail: true });
+    setTouched({ companyName: true, subdomain: true, openRouterKey: true, sslEmail: true, baseline: true, brandPrimary: true });
     setSummaryFields(Object.keys(errors) as ProvisionField[]);
     return false;
   }
@@ -562,6 +695,13 @@ export function ProvisionModal({ open, hub, initialTab, initialTier, onClose, on
         openRouterKey: form.openRouterKey.trim(),
         model: form.model,
         skills: form.skills,
+        businessMode: form.businessMode,
+        nicheTemplate: form.nicheTemplate,
+        region: form.region,
+        currency: form.currency,
+        baseline: baselineFromForm(form),
+        brandPrimary: form.brandPrimary.trim().toUpperCase(),
+        autopilotSocial: form.autopilotSocial,
       })
       .then(
         (result) => ({ ok: true as const, result }),
@@ -679,6 +819,26 @@ export function ProvisionModal({ open, hub, initialTab, initialTier, onClose, on
                   </div>
                 )}
 
+                {drafts.length > 0 && (
+                  <Field id={ids.draft} label="Start from an onboarding draft" hint="Filled in by sales. Everything stays editable.">
+                    <select
+                      id={ids.draft}
+                      defaultValue=""
+                      onChange={(event) => applyDraft(event.target.value)}
+                      className="field"
+                    >
+                      <option value="" className="bg-[#101016]">
+                        No draft
+                      </option>
+                      {drafts.map((row) => (
+                        <option key={row.id} value={row.id} className="bg-[#101016]">
+                          {row.businessName}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                )}
+
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field id={ids.companyName} label="Company name" error={fieldError("companyName")}>
                     <input
@@ -716,7 +876,128 @@ export function ProvisionModal({ open, hub, initialTab, initialTier, onClose, on
                   </Field>
                 </div>
 
+                <fieldset>
+                  <legend className="mb-1.5 text-sm font-medium text-ink-2">Business mode</legend>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <ChoiceCard
+                      name={`${radioGroup}-mode`}
+                      selected={form.businessMode === "general"}
+                      onSelect={() => chooseMode("general")}
+                      icon={<Building2 aria-hidden className="size-4 text-hyper-soft" />}
+                      title="General Service Business"
+                      body="Clinics, salons, restaurants, travel and coaching: leads, appointments and follow-ups."
+                    />
+                    <ChoiceCard
+                      name={`${radioGroup}-mode`}
+                      selected={form.businessMode === "ecommerce"}
+                      onSelect={() => chooseMode("ecommerce")}
+                      icon={<ShoppingBag aria-hidden className="size-4 text-gold" />}
+                      title="E-Commerce Store"
+                      body="Online brands: catalog sync, order desk, payment or COD checks and courier dispatch."
+                    />
+                  </div>
+                </fieldset>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field id={ids.kit} label="Industry starter kit" hint="Sets the business mode and preselects its skills.">
+                    <select
+                      id={ids.kit}
+                      value={form.nicheTemplate}
+                      onChange={(event) => chooseKit(event.target.value as NicheTemplate)}
+                      className="field"
+                    >
+                      {NICHE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value} className="bg-[#101016]">
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <fieldset>
+                    <legend className="mb-1.5 text-sm font-medium text-ink-2">Region and currency</legend>
+                    <div className="grid grid-cols-2 gap-2">
+                      <ChoiceCard
+                        name={`${radioGroup}-region`}
+                        selected={form.region === "bd"}
+                        onSelect={() => chooseRegion("bd")}
+                        title="Bangladesh ৳"
+                        body="bKash, Nagad, Pathao"
+                      />
+                      <ChoiceCard
+                        name={`${radioGroup}-region`}
+                        selected={form.region === "global"}
+                        onSelect={() => chooseRegion("global")}
+                        title="Global $"
+                        body="Stripe, Shopify, DHL"
+                      />
+                    </div>
+                    {form.region === "global" && (
+                      <div className="mt-2">
+                        <label htmlFor={ids.currency} className="sr-only">
+                          Billing currency
+                        </label>
+                        <select
+                          id={ids.currency}
+                          value={form.currency}
+                          onChange={(event) => update("currency", event.target.value)}
+                          className="field"
+                        >
+                          {REGION_CURRENCIES.global.map((currency) => (
+                            <option key={currency} value={currency} className="bg-[#101016]">
+                              {currency} {CURRENCY_SYMBOLS[currency]}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </fieldset>
+                </div>
+
                 <TierPicker value={form.tier} onChange={(tier) => update("tier", tier)} />
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field
+                    id={ids.brandPrimary}
+                    label="Brand primary colour"
+                    error={fieldError("brandPrimary")}
+                    hint="Stamped on every social visual the autopilot makes."
+                  >
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        aria-label="Pick the brand primary colour"
+                        value={HEX_COLOR_PATTERN.test(form.brandPrimary) ? form.brandPrimary : DEFAULT_BRAND_PRIMARY}
+                        onChange={(event) => update("brandPrimary", event.target.value.toUpperCase())}
+                        className="size-11 shrink-0 cursor-pointer rounded-lg border border-white/10 bg-transparent p-1"
+                      />
+                      <input
+                        {...fieldProps("brandPrimary")}
+                        value={form.brandPrimary}
+                        onChange={(event) => update("brandPrimary", event.target.value)}
+                        placeholder="#00F5D4"
+                        autoComplete="off"
+                        spellCheck={false}
+                        maxLength={7}
+                        className="field font-mono"
+                      />
+                    </div>
+                  </Field>
+                  <div>
+                    <p className="mb-1.5 text-sm font-medium text-ink-2">100% social autopilot</p>
+                    <div className="flex min-h-11 items-center justify-between gap-3 rounded-xl border border-white/10 px-3 py-2">
+                      <span className="text-xs leading-relaxed text-ink-2">
+                        {form.autopilotSocial
+                          ? "Zero-touch: posts publish on their own once the account is live."
+                          : "One-tap: the owner approves every post before it publishes."}
+                      </span>
+                      <Switch
+                        checked={form.autopilotSocial}
+                        onChange={(next) => update("autopilotSocial", next)}
+                        label="100% social autopilot"
+                      />
+                    </div>
+                  </div>
+                </div>
                 {live && isCluster && (
                   <p className="-mt-3 text-xs text-ink-3">
                     The hub applies its own limits per plan. The tenant row shows what it actually set.
@@ -773,10 +1054,50 @@ export function ProvisionModal({ open, hub, initialTab, initialTier, onClose, on
                   </Field>
                 )}
 
+                <fieldset id={ids.baseline}>
+                  <legend className="mb-1.5 text-sm font-medium text-ink-2">Baseline ROI metrics</legend>
+                  <p className="mb-2 text-xs text-ink-3">
+                    Where the business stands today, in {form.currency}. ROI is measured against this. Leave blank if you
+                    do not have it yet.
+                  </p>
+                  <div className="grid gap-2 sm:grid-cols-4">
+                    {(
+                      [
+                        ["baselineInquiries", "Monthly inquiries", "420"],
+                        ["baselineConversion", "Conversion rate %", "8"],
+                        ["baselineValue", "Profit per order or booking", "650"],
+                        ["baselineRetainer", "Monthly retainer", "25000"],
+                      ] as const
+                    ).map(([key, label, placeholder]) => (
+                      <div key={key}>
+                        <label htmlFor={`${ids.baseline}-${key}`} className="mb-1 block text-xs text-ink-2">
+                          {label}
+                        </label>
+                        <input
+                          id={`${ids.baseline}-${key}`}
+                          inputMode="decimal"
+                          value={form[key]}
+                          onChange={(event) => update(key, event.target.value)}
+                          onBlur={() => setTouched((current) => ({ ...current, baseline: true }))}
+                          placeholder={placeholder}
+                          aria-invalid={Boolean(fieldError("baseline"))}
+                          className="field font-mono"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  {fieldError("baseline") && (
+                    <p className="mt-1.5 flex items-start gap-1.5 text-xs text-halt-soft">
+                      <CircleAlert aria-hidden className="mt-px size-3.5 shrink-0" />
+                      {fieldError("baseline")}
+                    </p>
+                  )}
+                </fieldset>
+
                 <fieldset>
-                  <legend className="mb-1.5 text-sm font-medium text-ink-2">Pre-mount shared agency skills</legend>
+                  <legend className="mb-1.5 text-sm font-medium text-ink-2">Agent skills</legend>
                   <div className="grid gap-2 sm:grid-cols-3">
-                    {SHARED_SKILLS.map((skill) => {
+                    {SHARED_SKILLS.filter((skill) => form.businessMode === "ecommerce" || !skill.ecommerceOnly).map((skill) => {
                       const checked = form.skills.includes(skill.id);
                       return (
                         <label
@@ -806,8 +1127,8 @@ export function ProvisionModal({ open, hub, initialTab, initialTier, onClose, on
                   </div>
                   {live && isCluster && (
                     <p className="mt-1.5 text-xs text-ink-3">
-                      The hub syncs skills by plan today. Your selection is stored on the client&apos;s config, and the
-                      next screen lists what was actually synced.
+                      The router always stays on, and a package can limit this list. The next screen shows what was
+                      actually synced.
                     </p>
                   )}
                 </fieldset>

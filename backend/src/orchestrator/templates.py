@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 
 from ..config.settings import Settings, get_settings
+from ..ops.presets import render_business_profile
 
 if TYPE_CHECKING:  # avoid a circular import at runtime
     from ..clients.models import Client
@@ -223,6 +224,7 @@ class TemplateRenderer:
             config_text,
             dir_mode=self.settings.tenant_dir_mode,
             env_mode=self.settings.tenant_env_mode,
+            profile_text=render_business_profile(client),
         )
         logger.info("Rendered tenant files for %s into %s", client.slug, tenant_dir)
         return env_text
@@ -241,6 +243,7 @@ def _write_tenant_files(
     *,
     dir_mode: int,
     env_mode: int,
+    profile_text: str = "",
 ) -> None:
     """Blocking half of the tenant file write.
 
@@ -268,6 +271,9 @@ def _write_tenant_files(
     _try_chmod(env_path, env_mode)
 
     (directory / "config.yaml").write_text(config_text, encoding="utf-8")
+    if profile_text:
+        # Read by the ai-employee-orchestrator skill. Holds no secrets.
+        (directory / "business-profile.yaml").write_text(profile_text, encoding="utf-8")
 
 
 def _try_chmod(path: Path, mode: int) -> None:

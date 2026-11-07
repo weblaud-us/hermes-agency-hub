@@ -1,13 +1,15 @@
 "use client";
 
 import { motion } from "motion/react";
-import { ArrowLeft, KeyRound, Plus } from "lucide-react";
+import { ArrowLeft, Plus } from "lucide-react";
 import Link from "next/link";
+import { ProfileMenu } from "@/components/auth/ProfileMenu";
 import { Sparkline } from "@/components/ui/Sparkline";
 import { SpotlightCard } from "@/components/ui/SpotlightCard";
 import { StatusOrb, type OrbTone } from "@/components/ui/StatusOrb";
 import { Wordmark } from "@/components/ui/Wordmark";
 import type { FleetSnapshot } from "@/lib/api";
+import { PERMISSIONS, type SessionUser } from "@/lib/auth";
 import { riseIn, staggerContainer } from "@/lib/motion";
 import { cn, formatCurrency, formatInteger } from "@/lib/utils";
 
@@ -15,8 +17,10 @@ interface TelemetryHeaderProps {
   snapshot: FleetSnapshot | null;
   mode: "live" | "mock" | null;
   stale: boolean;
-  onConnect: () => void;
+  user: SessionUser | null;
   onProvision: () => void;
+  /** The fleet figures only make sense on the fleet tab, and not every role may read them. */
+  showFleet: boolean;
 }
 
 function clusterState(snapshot: FleetSnapshot | null, stale: boolean): { tone: OrbTone; label: string } {
@@ -63,7 +67,7 @@ function NotReported() {
   return <div className="flex h-9 items-end font-mono text-[11px] text-ink-3">Not exposed by the hub API</div>;
 }
 
-export function TelemetryHeader({ snapshot, mode, stale, onConnect, onProvision }: TelemetryHeaderProps) {
+export function TelemetryHeader({ snapshot, mode, stale, user, onProvision, showFleet }: TelemetryHeaderProps) {
   const cluster = clusterState(snapshot, stale);
   const metrics = snapshot?.metrics;
   const history = snapshot?.history;
@@ -86,40 +90,41 @@ export function TelemetryHeader({ snapshot, mode, stale, onConnect, onProvision 
           <h1 className="hidden text-sm text-ink-3 lg:block">Agency Console</h1>
         </div>
 
-        <div className="flex items-center gap-2.5 font-mono text-xs tabular-nums" role="status">
-          <StatusOrb tone={cluster.tone} pulse={cluster.tone === "signal"} />
-          <span className="text-ink-2">{cluster.label}</span>
-          {snapshot?.health.latencyMs != null && !stale && <span className="text-ink-3">{snapshot.health.latencyMs}ms</span>}
-        </div>
+        {showFleet && (
+          <div className="flex items-center gap-2.5 font-mono text-xs tabular-nums" role="status">
+            <StatusOrb tone={cluster.tone} pulse={cluster.tone === "signal"} />
+            <span className="text-ink-2">{cluster.label}</span>
+            {snapshot?.health.latencyMs != null && !stale && <span className="text-ink-3">{snapshot.health.latencyMs}ms</span>}
+          </div>
+        )}
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={onConnect}
+          <span
             className={cn(
-              "inline-flex min-h-10 items-center gap-1.5 rounded-lg border px-3 font-mono text-[11px] uppercase tracking-wider transition-colors",
-              mode === "live"
-                ? "border-signal/35 bg-signal/10 text-signal hover:border-signal/60"
-                : "border-warn/35 bg-warn/10 text-warn hover:border-warn/60",
+              "inline-flex min-h-10 items-center rounded-lg border px-3 font-mono text-[11px] uppercase tracking-wider",
+              mode === "live" ? "border-signal/35 bg-signal/10 text-signal" : "border-warn/35 bg-warn/10 text-warn",
             )}
           >
-            <KeyRound aria-hidden className="size-3.5" />
-            {mode === "live" ? "Live hub" : "Mock telemetry"}
-          </button>
-          <motion.button
-            type="button"
-            whileHover={{ y: -1 }}
-            whileTap={{ scale: 0.97 }}
-            onClick={onProvision}
-            disabled={!mode}
-            className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-signal px-3.5 text-[13px] font-semibold text-obsidian transition-colors hover:bg-[#3ff9e2] disabled:opacity-50"
-          >
-            <Plus aria-hidden className="size-4" />
-            Provision client
-          </motion.button>
+            {mode === "live" ? "Live hub" : mode === "mock" ? "Sample data" : "Connecting"}
+          </span>
+          {user?.permissions.includes(PERMISSIONS.provision) && (
+            <motion.button
+              type="button"
+              whileHover={{ y: -1 }}
+              whileTap={{ scale: 0.97 }}
+              onClick={onProvision}
+              disabled={!mode}
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-signal px-3.5 text-[13px] font-semibold text-obsidian transition-colors hover:bg-[#3ff9e2] disabled:opacity-50"
+            >
+              <Plus aria-hidden className="size-4" />
+              Provision client
+            </motion.button>
+          )}
+          {user && <ProfileMenu user={user} preview={mode === "mock"} />}
         </div>
       </div>
 
+      {showFleet && (
       <motion.div
         variants={staggerContainer}
         initial="hidden"
@@ -184,6 +189,7 @@ export function TelemetryHeader({ snapshot, mode, stale, onConnect, onProvision 
           />
         </KpiCard>
       </motion.div>
+      )}
     </header>
   );
 }

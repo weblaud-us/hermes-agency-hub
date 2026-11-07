@@ -14,18 +14,18 @@ type Billing = "retainer" | "license";
 
 const TIER_COPY: Record<TierId, { pitch: string; retainer: string[]; license: string[] }> = {
   starter: {
-    pitch: "One agent on one workflow, for a first deployment.",
-    retainer: ["Lead qualification skill", "Isolated tenant volume", "Web dashboard and API access"],
-    license: ["Installs on one client server", "Lead qualification skill", "Generated install command"],
+    pitch: "A business that is always answered and always posting, for getting started.",
+    retainer: ["24/7 inbox: WhatsApp, Messenger, Instagram", "Zero-touch social media autopilot", "Weekly ROI report"],
+    license: ["Installs on one client server", "Social autopilot and inbox skills", "Generated install command"],
   },
   growth: {
-    pitch: "The full skill library for a business running on several channels.",
-    retainer: ["Full shared skill library", "Scheduled jobs and morning briefings", "Self-authored skills and memory"],
+    pitch: "The full specialist team for a business that wants growth, not just replies.",
+    retainer: ["Everything in Presence", "Reels, ads and email specialists", "Daily executive summary and 1-tap approvals"],
     license: ["Installs on one client server", "Full shared skill library", "Self-authored skills and memory"],
   },
   enterprise: {
-    pitch: "Isolated hardware and room to run heavy workloads.",
-    retainer: ["Dedicated client VPS", "Automated SSL", "Full shared skill library"],
+    pitch: "The whole growth system, with room for a busy store or several locations.",
+    retainer: ["Everything in Growth", "Order desk and catalog keeper for online stores", "Dedicated resources and priority QA"],
     license: ["Sized for heavy workloads", "Automated SSL", "Full shared skill library"],
   },
 };
@@ -105,7 +105,7 @@ function RoiConfigurator({
             optionClassName="flex-1 text-center px-2"
             options={TIER_ORDER.map((id) => ({
               value: id,
-              label: id === "enterprise" ? "Enterprise" : TIERS[id].label,
+              label: TIERS[id].label,
             }))}
           />
           <dl className="space-y-2.5 font-mono text-sm tabular-nums">
@@ -138,7 +138,7 @@ export function PricingTiers() {
 
   return (
     <section id="pricing" className="mx-auto max-w-7xl px-4 py-24 sm:px-6">
-      <SectionHeading eyebrow="Pricing" title="A monthly retainer, or a license for their server.">
+      <SectionHeading eyebrow="Pricing" title="One partner. One growth system. One monthly price.">
         Pick managed operations on your cluster, or install on the client&apos;s own infrastructure with a one-click
         command.
       </SectionHeading>
@@ -182,7 +182,7 @@ export function PricingTiers() {
             >
               <div className="relative flex flex-1 flex-col">
                 <div className="flex items-center justify-between gap-3">
-                  <h3 className="text-base font-semibold text-ink">{tier.label}</h3>
+                  <h3 className="text-base font-semibold text-ink">{tier.name}</h3>
                   {featured && (
                     <span className="rounded-full border border-signal/30 bg-signal/10 px-2.5 py-0.5 font-mono text-[10.5px] uppercase tracking-wider text-signal">
                       Most complete
@@ -207,6 +207,7 @@ export function PricingTiers() {
                             {formatCurrency(tier.monthly)}
                           </span>
                           <span className="text-sm text-ink-3">/mo</span>
+                          <span className="ml-1 text-xs text-ink-3">+ {formatCurrency(tier.setup)} setup</span>
                         </>
                       ) : (
                         <>

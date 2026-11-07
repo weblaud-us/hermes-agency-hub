@@ -19,7 +19,7 @@ WORKDIR /app
 # spawns no children today, but PID 1 without a reaper is a trap waiting for
 # the first subprocess someone adds.
 RUN apt-get update \
-    && apt-get install --no-install-recommends -y curl tini \
+    && apt-get install --no-install-recommends -y curl tini fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 # Dependencies before source, so editing code does not invalidate the

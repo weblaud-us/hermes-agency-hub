@@ -7,15 +7,68 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field, field_validator
 from slugify import slugify
 
-from .models import AuditStatus, ClientPlan, SubscriptionStatus
+from .models import (
+    AuditStatus,
+    BusinessMode,
+    ClientPlan,
+    NicheTemplate,
+    PackageTier,
+    RegionPreset,
+    SubscriptionStatus,
+)
 
 #: A single DNS label: lowercase alphanumerics and inner hyphens, 1-63 chars.
 #: Enforced here because an invalid label would only fail much later, when
 #: nginx refuses the generated server_name.
 SUBDOMAIN_PATTERN = r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
+
+
+HEX_COLOR_PATTERN = r"^#[0-9A-Fa-f]{6}$"
+
+
+class BrandKit(BaseModel):
+    """The identity the social autopilot stamps onto every visual it makes."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    primary_color: str = Field(default="#00F5D4", pattern=HEX_COLOR_PATTERN)
+    accent_color: str = Field(default="#6366F1", pattern=HEX_COLOR_PATTERN)
+    logo_text: str = Field(default="BRAND", min_length=1, max_length=24)
+    contact_cta: str = Field(default="Book / Order via WhatsApp or DM", min_length=1, max_length=80)
+    website_url: str | None = Field(default=None, max_length=300)
+
+    @field_validator("website_url")
+    @classmethod
+    def _http_only(cls, value: str | None) -> str | None:
+        # Rendered as a link in the portal, so a javascript: URL must not get through.
+        if value and not re.match(r"^https?://", value, re.IGNORECASE):
+            raise ValueError("website_url must start with http:// or https://")
+        return value or None
+
+
+class BaselineMetrics(BaseModel):
+    """A business before onboarding: the "before" column of its ROI report.
+
+    ``avg_customer_profit`` and ``monthly_investment`` are accepted as the names the
+    Weblaud brief uses for the same two figures. Stored and returned under the
+    longer names, which the rest of the hub already reads.
+    """
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    monthly_inquiries: int = Field(ge=0, le=10_000_000)
+    #: Percent of inquiries that became a booking or order, e.g. 12.5.
+    conversion_rate: float = Field(ge=0, le=100)
+    #: Gross profit per booking or delivered order, in the client's currency.
+    avg_order_or_profit_value: float = Field(
+        ge=0, validation_alias=AliasChoices("avg_order_or_profit_value", "avg_customer_profit")
+    )
+    monthly_retainer_investment: float = Field(
+        ge=0, validation_alias=AliasChoices("monthly_retainer_investment", "monthly_investment")
+    )
 
 
 class OnboardRequest(BaseModel):
@@ -33,6 +86,15 @@ class OnboardRequest(BaseModel):
     image: str | None = None
     config: dict[str, Any] = Field(default_factory=dict)
     channels: dict[str, Any] = Field(default_factory=dict)
+    business_mode: BusinessMode = BusinessMode.GENERAL
+    niche_template: NicheTemplate = NicheTemplate.CUSTOM
+    #: Sets ``plan`` when given. Otherwise it follows ``plan``.
+    package_tier: PackageTier | None = None
+    region_preset: RegionPreset = RegionPreset.GLOBAL
+    currency: str | None = None
+    baseline_metrics: BaselineMetrics | None = None
+    autopilot_social: bool = True
+    brand_kit: BrandKit | None = None
 
     @field_validator("subdomain")
     @classmethod
@@ -60,6 +122,14 @@ class ClientCreate(BaseModel):
     channels: dict[str, Any] = Field(default_factory=dict)
     stripe_customer_id: str | None = None
     stripe_subscription_id: str | None = None
+    business_mode: BusinessMode = BusinessMode.GENERAL
+    niche_template: NicheTemplate = NicheTemplate.CUSTOM
+    package_tier: PackageTier | None = None
+    region_preset: RegionPreset = RegionPreset.GLOBAL
+    currency: str | None = None
+    baseline_metrics: BaselineMetrics | None = None
+    autopilot_social: bool = True
+    brand_kit: BrandKit | None = None
 
     @field_validator("slug")
     @classmethod
@@ -76,6 +146,15 @@ class ClientUpdate(BaseModel):
     channels: dict[str, Any] | None = None
     stripe_customer_id: str | None = None
     stripe_subscription_id: str | None = None
+    business_mode: BusinessMode | None = None
+    niche_template: NicheTemplate | None = None
+    package_tier: PackageTier | None = None
+    region_preset: RegionPreset | None = None
+    currency: str | None = None
+    onboarding_stage: int | None = Field(default=None, ge=1, le=7)
+    baseline_metrics: BaselineMetrics | None = None
+    autopilot_social: bool | None = None
+    brand_kit: BrandKit | None = None
 
 
 class AuditLogRead(BaseModel):
@@ -103,6 +182,15 @@ class ClientRead(BaseModel):
     plan: ClientPlan
     subscription_status: SubscriptionStatus
     status_detail: str | None
+    business_mode: BusinessMode
+    niche_template: NicheTemplate
+    package_tier: PackageTier
+    region_preset: RegionPreset
+    currency: str
+    onboarding_stage: int
+    baseline_metrics_json: dict[str, Any] | None
+    autopilot_social: bool
+    brand_kit_json: dict[str, Any] | None
     image: str
     container_id: str | None
     container_name: str | None

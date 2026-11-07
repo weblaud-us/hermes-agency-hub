@@ -1,4 +1,4 @@
-import type { ApiPlan, TierId } from "./provisioning";
+import type { ApiPlan, BusinessMode, NicheTemplate, PackageTier, RegionPreset, TierId } from "./provisioning";
 
 export type TenantStatus = "running" | "provisioning" | "halted";
 export type DeploymentMode = "multi-tenant" | "client-vps";
@@ -26,6 +26,26 @@ export interface Tenant {
   secrets: { password: string | null; apiKey: string | null };
   monthlyRetainer: number;
   model: string | null;
+  businessMode: BusinessMode;
+  nicheTemplate: NicheTemplate;
+  packageTier: PackageTier;
+  region: RegionPreset;
+  currency: string;
+  /** 1 Discovery through 7 Autonomous Live. */
+  onboardingStage: number;
+  baseline: BaselineMetrics | null;
+  /** On: the social autopilot publishes by itself. Off: the owner approves each post. */
+  autopilotSocial: boolean;
+  /** The brand kit's primary colour, or null when none was set. */
+  brandPrimary: string | null;
+}
+
+export interface BaselineMetrics {
+  monthlyInquiries: number;
+  /** Percent, e.g. 12.5. */
+  conversionRate: number;
+  avgOrderOrProfitValue: number;
+  monthlyRetainerInvestment: number;
 }
 
 export interface HubHealth {
@@ -69,6 +89,13 @@ export interface OnboardInput {
   openRouterKey: string;
   model: string;
   skills: string[];
+  businessMode: BusinessMode;
+  nicheTemplate: NicheTemplate;
+  region: RegionPreset;
+  currency: string;
+  baseline: BaselineMetrics | null;
+  brandPrimary: string;
+  autopilotSocial: boolean;
 }
 
 export interface OnboardResult {

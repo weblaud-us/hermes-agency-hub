@@ -1,9 +1,9 @@
 """HTTP surface of the white-label client portal.
 
 Every route resolves to one tenant through :func:`require_tenant`, which checks
-that the token was minted for the tenant named in the path. All tenant data then
-comes through :func:`.readers.files_for`, so no handler ever builds a path from
-request input.
+that the token was minted for the tenant named in the path, or that the signed-in
+user may see that tenant. All tenant data then comes through
+:func:`.readers.files_for`, so no handler ever builds a path from request input.
 
 The admin router at the bottom is how a token comes to exist at all.
 """
@@ -16,20 +16,24 @@ import re
 import time
 import uuid
 from collections import defaultdict, deque
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..auth.dependencies import optional_user, require_permission
+from ..auth.models import User, UserRole
+from ..auth.permissions import ROLE_PERMISSIONS, Permission
 from ..clients import service as client_service
 from ..clients.models import AuditStatus, Client, ClientPlan, SubscriptionStatus
 from ..clients.schemas import SUBDOMAIN_PATTERN
 from ..config.database import get_session
-from ..config.security import new_internal_token, require_admin
+from ..config.security import new_internal_token
 from ..config.settings import Settings, get_settings
 from ..orchestrator.docker_service import DockerService, OrchestratorError, get_docker_service
 from . import readers, tenant_api
-from .errors import PortalError, coordinator_unavailable, unauthorized
+from .errors import PortalError, coordinator_unavailable, forbidden, unauthorized
 from .pairing import PairingSession, pairing_registry
 from .sanitize import scrub
 from .schemas import (
@@ -57,7 +61,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/portal/{subdomain}", tags=["portal"])
 admin_router = APIRouter(
-    prefix="/clients", tags=["clients"], dependencies=[Depends(require_admin)]
+    prefix="/clients",
+    tags=["clients"],
+    dependencies=[Depends(require_permission(Permission.PORTAL_LINKS))],
 )
 
 _MODEL_TIERS = {
@@ -111,22 +117,59 @@ _test_limit = _SlidingWindow(6, 60, "Too many tests at once. Please wait a momen
 
 
 # ------------------------------------------------------------------------ auth
-async def require_tenant(
+@dataclass(frozen=True)
+class PortalActor:
+    """Who is acting on this tenant. ``user`` is ``None`` for a bearer access link."""
+
+    client: Client
+    user: User | None
+
+    @property
+    def label(self) -> str:
+        return self.user.email if self.user else "owner:access-link"
+
+
+async def require_actor(
     subdomain: str,
     token: str | None = Header(default=None, alias="X-Client-Portal-Token"),
+    user: User | None = Depends(optional_user),
     session: AsyncSession = Depends(get_session),
-) -> Client:
-    """The tenant this token was minted for, or the same 401 for every failure."""
-    if not token or not re.fullmatch(SUBDOMAIN_PATTERN, subdomain):
+) -> PortalActor:
+    """The tenant in the path, if this caller may see it.
+
+    A token is judged alone, with the same 401 for every failure. A session is
+    different: the caller has proved who they are, so being refused a tenant is a
+    403. An owner gets that 403 for an unknown slug too, so that probing other
+    subdomains cannot reveal which ones exist.
+    """
+    if not re.fullmatch(SUBDOMAIN_PATTERN, subdomain):
+        raise unauthorized()
+    if not token and user is None:
         raise unauthorized()
     client = await client_service.get_by_slug(session, subdomain)
-    if client is None or client.subscription_status == SubscriptionStatus.ARCHIVED:
+    gone = client is None or client.subscription_status == SubscriptionStatus.ARCHIVED
+
+    if token:
+        if gone:
+            raise unauthorized()
+        try:
+            verify_token(token, slug=client.slug, secret=client.internal_token)
+        except PortalTokenError as exc:
+            raise unauthorized() from exc
+        return PortalActor(client, None)
+
+    if user.role is UserRole.CLIENT_OWNER:
+        if gone or client.id != user.client_id:
+            raise forbidden()
+    elif Permission.PORTAL_ANY not in ROLE_PERMISSIONS[user.role]:
+        raise forbidden()
+    elif gone:
         raise unauthorized()
-    try:
-        verify_token(token, slug=client.slug, secret=client.internal_token)
-    except PortalTokenError as exc:
-        raise unauthorized() from exc
-    return client
+    return PortalActor(client, user)
+
+
+async def require_tenant(actor: PortalActor = Depends(require_actor)) -> Client:
+    return actor.client
 
 
 async def require_writable(client: Client = Depends(require_tenant)) -> Client:

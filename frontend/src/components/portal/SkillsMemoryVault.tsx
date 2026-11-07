@@ -11,30 +11,11 @@ import { SpotlightCard } from "@/components/ui/SpotlightCard";
 import { Switch } from "@/components/ui/Switch";
 import { useToast } from "@/components/ui/Toaster";
 import type { BusinessMemory, LearnedSkill, MemoryFact, PortalClient, SkillsAndMemory } from "@/lib/portal-api";
-import { formatRelative } from "@/lib/portal-format";
+import { useI18n } from "@/lib/i18n";
 import { riseIn, SPRING, staggerContainer } from "@/lib/motion";
-import { cn, formatInteger } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
 type VaultTab = "skills" | "memory";
-
-const VAULT_TABS: { value: VaultTab; label: React.ReactNode }[] = [
-  {
-    value: "skills",
-    label: (
-      <span className="whitespace-nowrap">
-        <span className="hidden sm:inline">Autonomous </span>Skills Library
-      </span>
-    ),
-  },
-  {
-    value: "memory",
-    label: (
-      <span className="whitespace-nowrap">
-        <span className="hidden sm:inline">Persistent </span>Business Memory
-      </span>
-    ),
-  },
-];
 
 // ----------------------------------------------------------------------- skills
 function SkillDrawerBody({
@@ -46,6 +27,7 @@ function SkillDrawerBody({
   onToggle: (enabled: boolean) => void;
   onClose: () => void;
 }) {
+  const { t, number, relative } = useI18n();
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-start justify-between gap-3 border-b border-white/7 px-5 py-4">
@@ -56,7 +38,7 @@ function SkillDrawerBody({
         <button
           type="button"
           onClick={onClose}
-          aria-label="Close skill details"
+          aria-label={t("vault.closeSkill")}
           className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg text-ink-2 hover:bg-white/6 hover:text-ink"
         >
           <X aria-hidden className="size-4" />
@@ -65,24 +47,24 @@ function SkillDrawerBody({
 
       <div className="flex items-center justify-between gap-3 border-b border-white/7 px-5 py-3">
         <p className="font-mono text-xs tabular-nums text-ink-3">
-          Used {formatInteger(skill.useCount)} times • {formatRelative(skill.lastUsed)}
+          {t("vault.used", { count: number(skill.useCount), when: relative(skill.lastUsed) })}
         </p>
         <label className="inline-flex items-center gap-2 text-xs text-ink-2">
-          {skill.enabled ? "On" : "Off"}
-          <Switch checked={skill.enabled} onChange={onToggle} label={`${skill.title} enabled`} />
+          {skill.enabled ? t("vault.on") : t("vault.off")}
+          <Switch checked={skill.enabled} onChange={onToggle} label={t("vault.skillEnabled", { skill: skill.title })} />
         </label>
       </div>
 
       <div className="thin-scroll min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4">
         {skill.description && <p className="text-sm leading-relaxed text-ink-2">{skill.description}</p>}
         <section>
-          <h3 className="text-xs font-medium text-ink-3">When it runs</h3>
+          <h3 className="text-xs font-medium text-ink-3">{t("vault.whenRuns")}</h3>
           <div className="mt-2 rounded-xl border border-hyper/25 bg-hyper/8 p-3">
-            <Markdown source={skill.triggerConditions || "Decided by your Coordinator from context."} />
+            <Markdown source={skill.triggerConditions || t("vault.triggerDefault")} />
           </div>
         </section>
         <section>
-          <h3 className="text-xs font-medium text-ink-3">Standard operating procedure</h3>
+          <h3 className="text-xs font-medium text-ink-3">{t("vault.sop")}</h3>
           <div className="mt-2 rounded-xl border border-white/7 bg-black/25 p-4">
             <Markdown source={skill.workflowMarkdown} className="font-mono text-[13px]" />
           </div>
@@ -101,14 +83,15 @@ function SkillsLibrary({
   onToggle: (skill: LearnedSkill, enabled: boolean) => void;
   onInspect: (skill: LearnedSkill) => void;
 }) {
+  const { t, number, relative } = useI18n();
   return (
     <div className="space-y-6">
       <section aria-labelledby="agency-core-heading">
         <h3 id="agency-core-heading" className="flex items-center gap-2 text-sm font-semibold text-ink">
           <ShieldCheck aria-hidden className="size-4 text-gold" />
-          Agency Core Capabilities
+          {t("vault.coreTitle")}
         </h3>
-        <p className="mt-1 text-xs text-ink-3">Verified and maintained for you by your account team.</p>
+        <p className="mt-1 text-xs text-ink-3">{t("vault.coreBody")}</p>
         <motion.ul
           variants={staggerContainer}
           initial="hidden"
@@ -121,9 +104,9 @@ function SkillsLibrary({
                 <div className="flex items-center justify-between gap-2">
                   <span className="inline-flex min-h-6 items-center gap-1 rounded-full border border-gold/30 bg-gold/10 px-2 font-mono text-[11px] text-gold">
                     <Lock aria-hidden className="size-3" />
-                    Verified
+                    {t("vault.verified")}
                   </span>
-                  <span className="font-mono text-[11px] text-signal">{skill.active ? "Active" : "Paused"}</span>
+                  <span className="font-mono text-[11px] text-signal">{skill.active ? t("vault.active") : t("vault.paused")}</span>
                 </div>
                 <h4 className="mt-3 text-sm font-semibold leading-snug text-ink">{skill.title}</h4>
                 <p className="mt-1.5 text-xs leading-relaxed text-ink-2">{skill.description}</p>
@@ -132,18 +115,18 @@ function SkillsLibrary({
             </motion.li>
           ))}
         </motion.ul>
-        {data.agencySkills.length === 0 && <p className="mt-3 text-sm text-ink-3">Nothing is active on your plan yet.</p>}
+        {data.agencySkills.length === 0 && <p className="mt-3 text-sm text-ink-3">{t("vault.coreEmpty")}</p>}
       </section>
 
       <section aria-labelledby="learned-heading">
         <h3 id="learned-heading" className="flex items-center gap-2 text-sm font-semibold text-ink">
           <Sparkles aria-hidden className="size-4 text-signal" />
-          Self-Learned Client Skills
+          {t("vault.learnedTitle")}
         </h3>
-        <p className="mt-1 text-xs text-ink-3">Workflows your Coordinator learned while working for your business.</p>
+        <p className="mt-1 text-xs text-ink-3">{t("vault.learnedBody")}</p>
         {data.learnedSkills.length === 0 ? (
           <div className="mt-3 rounded-2xl border border-white/7 bg-white/2 p-6 text-center text-sm text-ink-2">
-            Nothing learned yet. As your Coordinator handles repeat situations, it writes them down here for you to review.
+            {t("vault.learnedEmpty")}
           </div>
         ) : (
           <ul className="mt-3 grid gap-3 md:grid-cols-2">
@@ -158,13 +141,13 @@ function SkillsLibrary({
                     <Switch
                       checked={skill.enabled}
                       onChange={(enabled) => onToggle(skill, enabled)}
-                      label={`${skill.title} enabled`}
+                      label={t("vault.skillEnabled", { skill: skill.title })}
                     />
                   </div>
                   <p className="mt-2 text-xs leading-relaxed text-ink-2">{skill.description}</p>
                   <div className="mt-3 flex items-center justify-between gap-2">
                     <p className="font-mono text-[11px] tabular-nums text-ink-3">
-                      {formatInteger(skill.useCount)} uses • {formatRelative(skill.lastUsed)}
+                      {t("vault.uses", { count: number(skill.useCount), when: relative(skill.lastUsed) })}
                     </p>
                     <motion.button
                       type="button"
@@ -174,7 +157,7 @@ function SkillsLibrary({
                       className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-white/12 px-3 text-xs font-medium text-ink transition-colors hover:border-white/25"
                     >
                       <BookOpenCheck aria-hidden className="size-3.5" />
-                      View SOP
+                      {t("vault.viewSop")}
                     </motion.button>
                   </div>
                 </SpotlightCard>
@@ -202,6 +185,7 @@ function FactCard({
   onReplace: (text: string) => Promise<string | null>;
   onRemove: () => void;
 }) {
+  const { t } = useI18n();
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [draft, setDraft] = useState(fact.text);
@@ -237,7 +221,7 @@ function FactCard({
       className="rounded-2xl border border-white/7 bg-white/2 p-4"
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="font-mono text-[11px] text-hyper-soft">{pending ? "Saving..." : fact.category}</span>
+        <span className="font-mono text-[11px] text-hyper-soft">{pending ? t("vault.saving") : fact.category}</span>
         {!editing && !pending && (
           <div className="-my-1 -mr-1 flex items-center">
             {confirming ? (
@@ -247,14 +231,14 @@ function FactCard({
                   onClick={onRemove}
                   className="inline-flex min-h-9 items-center rounded-lg px-2.5 text-xs font-medium text-halt-soft hover:bg-halt/12"
                 >
-                  Remove
+                  {t("vault.remove")}
                 </button>
                 <button
                   type="button"
                   onClick={() => setConfirming(false)}
                   className="inline-flex min-h-9 items-center rounded-lg px-2.5 text-xs text-ink-2 hover:bg-white/6"
                 >
-                  Keep
+                  {t("vault.keep")}
                 </button>
               </>
             ) : (
@@ -266,7 +250,7 @@ function FactCard({
                     setError(null);
                     setEditing(true);
                   }}
-                  aria-label={`Edit: ${fact.text}`}
+                  aria-label={t("vault.editItem", { text: fact.text })}
                   className="inline-flex size-9 items-center justify-center rounded-lg text-ink-3 transition-colors hover:bg-white/6 hover:text-ink"
                 >
                   <Pencil aria-hidden className="size-3.5" />
@@ -274,7 +258,7 @@ function FactCard({
                 <button
                   type="button"
                   onClick={() => setConfirming(true)}
-                  aria-label={`Remove: ${fact.text}`}
+                  aria-label={t("vault.removeItem", { text: fact.text })}
                   className="inline-flex size-9 items-center justify-center rounded-lg text-ink-3 transition-colors hover:bg-halt/12 hover:text-halt-soft"
                 >
                   <Trash2 aria-hidden className="size-3.5" />
@@ -288,7 +272,7 @@ function FactCard({
       {editing ? (
         <form onSubmit={save} className="mt-2">
           <label htmlFor={fieldId} className="sr-only">
-            Edit this business rule
+            {t("vault.editRule")}
           </label>
           <textarea
             id={fieldId}
@@ -312,7 +296,7 @@ function FactCard({
               onClick={() => setEditing(false)}
               className="inline-flex min-h-10 items-center rounded-lg px-3 text-xs text-ink-2 hover:bg-white/6"
             >
-              Cancel
+              {t("common.cancel")}
             </button>
             <button
               type="submit"
@@ -320,7 +304,7 @@ function FactCard({
               className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-signal px-3 text-xs font-semibold text-obsidian disabled:opacity-50"
             >
               <Check aria-hidden className="size-3.5" />
-              {saving ? "Saving..." : "Save"}
+              {saving ? t("vault.saving") : t("common.save")}
             </button>
           </div>
         </form>
@@ -344,6 +328,7 @@ function MemoryEditor({
   onReplace: (id: string, text: string) => Promise<string | null>;
   onRemove: (id: string) => void;
 }) {
+  const { t, number } = useI18n();
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -372,14 +357,14 @@ function MemoryEditor({
       <SpotlightCard className="rounded-2xl p-4 sm:p-5">
         <form onSubmit={add}>
           <label htmlFor={inputId} className="text-sm font-semibold text-ink">
-            Add Business Rule to Memory
+            {t("vault.addRuleTitle")}
           </label>
           <div className="mt-2 flex flex-col gap-2 sm:flex-row">
             <input
               id={inputId}
               value={draft}
               maxLength={400}
-              placeholder="Delivery inside Dhaka takes 24-48h (70 BDT)"
+              placeholder={t("vault.rulePlaceholder")}
               onChange={(event) => setDraft(event.target.value)}
               aria-invalid={Boolean(error)}
               aria-describedby={error ? `${errorId} ${helpId}` : helpId}
@@ -393,7 +378,7 @@ function MemoryEditor({
               className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-signal px-4 text-sm font-semibold text-obsidian disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Plus aria-hidden className="size-4" />
-              Add rule
+              {t("vault.addRule")}
             </motion.button>
           </div>
           {error && (
@@ -402,28 +387,28 @@ function MemoryEditor({
             </p>
           )}
           <p id={helpId} className="mt-2 text-xs leading-relaxed text-ink-3">
-            Write facts about your policies, prices and procedures. New rules apply from your Coordinator&apos;s next conversation.
+            {t("vault.ruleHelp")}
           </p>
         </form>
         <div className="mt-4">
           <div className="mb-1.5 flex items-center justify-between gap-3 font-mono text-[11px] tabular-nums text-ink-3">
-            <span>Memory capacity</span>
+            <span>{t("vault.capacity")}</span>
             <span>
-              {formatInteger(memory.usedChars)} / {formatInteger(memory.limitChars)} characters
+              {t("vault.characters", { used: number(memory.usedChars), limit: number(memory.limitChars) })}
             </span>
           </div>
           <Meter
             value={memory.usedChars}
             max={memory.limitChars}
-            label="Memory capacity"
-            valueText={`${memory.usedChars} of ${memory.limitChars} characters used`}
+            label={t("vault.capacity")}
+            valueText={t("vault.charactersUsed", { used: number(memory.usedChars), limit: number(memory.limitChars) })}
           />
         </div>
       </SpotlightCard>
 
       {memory.facts.length === 0 ? (
         <div className="rounded-2xl border border-white/7 bg-white/2 p-6 text-center text-sm text-ink-2">
-          Nothing saved yet. Add your first rule above, or teach your Coordinator in conversation.
+          {t("vault.memoryEmpty")}
         </div>
       ) : (
         <ul className="relative grid gap-3 md:grid-cols-2">
@@ -446,6 +431,7 @@ function MemoryEditor({
 
 // ------------------------------------------------------------------------- vault
 export function SkillsMemoryVault({ client, onChanged }: { client: PortalClient; onChanged: () => void }) {
+  const { t } = useI18n();
   const notify = useToast();
   const [tab, setTab] = useState<VaultTab>("skills");
   const [data, setData] = useState<SkillsAndMemory | null>(null);
@@ -458,9 +444,9 @@ export function SkillsMemoryVault({ client, onChanged }: { client: PortalClient;
       setData(await client.skillsAndMemory());
       setError(null);
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : "Could not load your skills and memory.");
+      setError(failure instanceof Error ? failure.message : t("vault.loadError"));
     }
-  }, [client]);
+  }, [client, t]);
 
   useEffect(() => {
     let cancelled = false;
@@ -470,12 +456,12 @@ export function SkillsMemoryVault({ client, onChanged }: { client: PortalClient;
         if (!cancelled) setData(next);
       })
       .catch((failure: unknown) => {
-        if (!cancelled) setError(failure instanceof Error ? failure.message : "Could not load your skills and memory.");
+        if (!cancelled) setError(failure instanceof Error ? failure.message : t("vault.loadError"));
       });
     return () => {
       cancelled = true;
     };
-  }, [client]);
+  }, [client, t]);
 
   function setFacts(update: (memory: BusinessMemory) => BusinessMemory) {
     setData((current) => (current ? { ...current, memory: update(current.memory) } : current));
@@ -505,11 +491,11 @@ export function SkillsMemoryVault({ client, onChanged }: { client: PortalClient;
     apply(enabled);
     try {
       await client.toggleSkill(skill.id, enabled);
-      notify(`${skill.title} is ${enabled ? "on" : "off"}.`);
+      notify(enabled ? t("vault.isOn", { skill: skill.title }) : t("vault.isOff", { skill: skill.title }));
       onChanged();
     } catch (failure) {
       apply(!enabled);
-      notify(failure instanceof Error ? failure.message : "That change could not be saved.", "error");
+      notify(failure instanceof Error ? failure.message : t("ch.saveFailed"), "error");
     }
   }
 
@@ -524,7 +510,7 @@ export function SkillsMemoryVault({ client, onChanged }: { client: PortalClient;
       return null;
     } catch (failure) {
       if (previous) setFacts(() => previous);
-      return failure instanceof Error ? failure.message : "That rule could not be saved.";
+      return failure instanceof Error ? failure.message : t("vault.ruleFailed");
     } finally {
       setPending(pendingId, false);
     }
@@ -536,7 +522,7 @@ export function SkillsMemoryVault({ client, onChanged }: { client: PortalClient;
       setFacts(() => next);
       return null;
     } catch (failure) {
-      return failure instanceof Error ? failure.message : "That change could not be saved.";
+      return failure instanceof Error ? failure.message : t("ch.saveFailed");
     }
   }
 
@@ -548,7 +534,7 @@ export function SkillsMemoryVault({ client, onChanged }: { client: PortalClient;
       setFacts(() => next);
     } catch (failure) {
       if (previous) setFacts(() => previous);
-      notify(failure instanceof Error ? failure.message : "That entry could not be removed.", "error");
+      notify(failure instanceof Error ? failure.message : t("vault.removeFailed"), "error");
     }
   }
 
@@ -563,19 +549,44 @@ export function SkillsMemoryVault({ client, onChanged }: { client: PortalClient;
             className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-halt/40 px-3 font-medium hover:border-halt/70"
           >
             <RotateCw aria-hidden className="size-3.5" />
-            Try again
+            {t("common.retry")}
           </button>
         </div>
       );
     }
-    return <div aria-busy="true" aria-label="Loading skills and memory" className="h-96 animate-pulse rounded-3xl bg-white/3" />;
+    return <div aria-busy="true" aria-label={t("common.loading")} className="h-96 animate-pulse rounded-3xl bg-white/3" />;
   }
 
   const inspected = data.learnedSkills.find((skill) => skill.id === inspecting) ?? null;
 
   return (
     <div>
-      <Segmented options={VAULT_TABS} value={tab} onChange={setTab} label="Vault sections" optionClassName="px-3 sm:px-4" />
+      <Segmented
+        options={[
+          {
+            value: "skills" as const,
+            label: (
+              <span className="whitespace-nowrap">
+                <span className="hidden sm:inline">{t("vault.skillsTabPrefix")}</span>
+                {t("vault.skillsTab")}
+              </span>
+            ),
+          },
+          {
+            value: "memory" as const,
+            label: (
+              <span className="whitespace-nowrap">
+                <span className="hidden sm:inline">{t("vault.memoryTabPrefix")}</span>
+                {t("vault.memoryTab")}
+              </span>
+            ),
+          },
+        ]}
+        value={tab}
+        onChange={setTab}
+        label={t("vault.sections")}
+        optionClassName="px-3 sm:px-4"
+      />
       <div className="mt-4">
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
@@ -601,7 +612,7 @@ export function SkillsMemoryVault({ client, onChanged }: { client: PortalClient;
         </AnimatePresence>
       </div>
 
-      <Dialog open={inspected !== null} onClose={() => setInspecting(null)} title="Skill details" placement="right">
+      <Dialog open={inspected !== null} onClose={() => setInspecting(null)} title={t("vault.skillDetails")} placement="right">
         {inspected && (
           <SkillDrawerBody
             key={inspected.id}

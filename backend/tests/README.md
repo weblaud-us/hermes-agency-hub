@@ -6,6 +6,8 @@ tests/
   test_unit.py         generated artefacts, file modes, naming, port allocation
   test_orchestrator.py container lifecycle: SDK calls, provisioning, teardown
   test_e2e_api.py      the HTTP surface, end to end
+  test_auth_rbac.py    sign-in, session tokens, one-time codes, the role matrix
+  test_roi_and_approvals.py  ROI arithmetic, approval states, guardrails, CRM, skills
   test_real_agent.py   opt-in: a new tenant on the real agent image
 ```
 
@@ -78,6 +80,7 @@ Overrides: `HERMES_TEST_IMAGE` (default `alpine:3.20`),
 | `test_unit.py` | renderer, settings, allocator, `tmp_path` | nothing |
 | `test_orchestrator.py` | `DockerService`, provisioner, DB, filesystem | the Docker SDK client |
 | `test_e2e_api.py` | the whole app, provisioner, renderer, DB | the Docker SDK client, `DockerService.probe` |
+| `test_auth_rbac.py`, `test_roi_and_approvals.py` | the whole app, as above, plus the real `shared-skills/` | the Docker SDK client, `DockerService.probe` |
 
 `FakeDockerClient` (in `conftest.py`) records what the daemon was asked to do
 **and** synthesises the `HostConfig` a daemon would build from it. One helper,

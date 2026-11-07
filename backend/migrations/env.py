@@ -21,7 +21,9 @@ from src.config.settings import get_settings
 # Importing the models registers them on Base.metadata; without this,
 # autogenerate would see an empty schema and happily write a migration that
 # drops every table.
+from src.auth import models as _auth_models  # noqa: F401
 from src.clients import models as _models  # noqa: F401
+from src.ops import models as _ops_models  # noqa: F401
 
 config = context.config
 

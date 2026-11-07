@@ -2,13 +2,17 @@
 
 import { AnimatePresence, motion } from "motion/react";
 import {
+  Building2,
   ExternalLink,
+  Eye,
   KeyRound,
   Layers,
   Link2,
   Power,
   RotateCw,
   Search,
+  ShoppingBag,
+  SlidersHorizontal,
   SquareTerminal,
   UserRoundCheck,
   X,
@@ -19,8 +23,9 @@ import { Segmented } from "@/components/ui/Segmented";
 import { StatusOrb, type OrbTone } from "@/components/ui/StatusOrb";
 import { useToast } from "@/components/ui/Toaster";
 import type { DeploymentMode, Tenant, TenantStatus } from "@/lib/api";
+import { PERMISSIONS } from "@/lib/auth";
 import { SPRING } from "@/lib/motion";
-import { TIERS } from "@/lib/provisioning";
+import { CURRENCY_SYMBOLS, ONBOARDING_STEPS, SHADOW_WEEK_STAGE, TIERS } from "@/lib/provisioning";
 import { cn, copyToClipboard, formatUptime } from "@/lib/utils";
 
 type StatusFilter = "all" | TenantStatus;
@@ -37,6 +42,8 @@ interface TenantTableProps {
   onRestart: (tenant: Tenant) => void;
   onTerminate: (tenant: Tenant) => void;
   onCopyPortalLink: (tenant: Tenant) => void;
+  onManage: (tenant: Tenant) => void;
+  permissions: string[];
 }
 
 const STATUS_META: Record<TenantStatus, { label: string; tone: OrbTone; text: string }> = {
@@ -46,7 +53,46 @@ const STATUS_META: Record<TenantStatus, { label: string; tone: OrbTone; text: st
 };
 
 const ROW_GRID =
-  "xl:grid-cols-[minmax(15rem,1.35fr)_minmax(13rem,1fr)_minmax(14rem,1fr)_minmax(9rem,0.6fr)_auto]";
+  "xl:grid-cols-[minmax(15rem,1.3fr)_minmax(11rem,0.8fr)_minmax(13rem,1fr)_minmax(13rem,0.9fr)_auto]";
+
+/** Seven segments rather than a percentage: "step 6 of 7" is what people say about it. */
+function OnboardingProgress({ stage }: { stage: number }) {
+  const label = ONBOARDING_STEPS[stage - 1] ?? ONBOARDING_STEPS[0];
+  const shadow = stage === SHADOW_WEEK_STAGE;
+  return (
+    <div>
+      <div
+        role="meter"
+        aria-label="Onboarding progress"
+        aria-valuemin={1}
+        aria-valuemax={7}
+        aria-valuenow={stage}
+        aria-valuetext={`Step ${stage} of 7, ${label}`}
+        className="flex gap-0.5"
+      >
+        {ONBOARDING_STEPS.map((step, index) => (
+          <span
+            key={step}
+            className={cn(
+              "h-1.5 flex-1 rounded-sm",
+              index < stage ? (shadow && index === stage - 1 ? "bg-warn" : "bg-signal") : "bg-white/10",
+            )}
+          />
+        ))}
+      </div>
+      <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ink-2">
+        <span className="font-mono tabular-nums text-ink-3">{stage}/7</span>
+        {label}
+      </p>
+      {shadow && (
+        <span className="mt-1 inline-flex items-center gap-1 rounded-md border border-warn/35 bg-warn/8 px-1.5 py-0.5 text-[10.5px] font-medium text-warn">
+          <Eye aria-hidden className="size-3" />
+          Shadow Week
+        </span>
+      )}
+    </div>
+  );
+}
 
 function CellLabel({ children }: { children: ReactNode }) {
   return <p className="mb-1.5 font-mono text-[10.5px] uppercase tracking-wider text-ink-3 xl:hidden">{children}</p>;
@@ -111,6 +157,8 @@ interface TenantRowProps {
   onRestart: (tenant: Tenant) => void;
   onTerminate: (tenant: Tenant) => void;
   onCopyPortalLink: (tenant: Tenant) => void;
+  onManage: (tenant: Tenant) => void;
+  permissions: string[];
 }
 
 const TenantRow = memo(function TenantRow({
@@ -122,8 +170,11 @@ const TenantRow = memo(function TenantRow({
   onRestart,
   onTerminate,
   onCopyPortalLink,
+  onManage,
+  permissions,
 }: TenantRowProps) {
   const notify = useToast();
+  const can = (permission: string) => permissions.includes(permission);
   const status = STATUS_META[tenant.status];
   const usage = tenant.usage;
   const host = tenant.url.replace(/^https?:\/\//, "");
@@ -161,11 +212,31 @@ const TenantRow = memo(function TenantRow({
         <div className="flex items-center gap-2">
           <span className="truncate text-sm font-semibold text-ink">{tenant.companyName}</span>
           <span className="shrink-0 rounded-md bg-white/6 px-1.5 py-0.5 text-[10.5px] text-ink-2">
-            {tenant.tier === "enterprise" ? "Enterprise" : TIERS[tenant.tier].label}
+            {TIERS[tenant.tier].label}
           </span>
           {tenant.deployment === "client-vps" && (
             <span className="shrink-0 rounded-md border border-hyper/40 px-1.5 py-0.5 text-[10.5px] text-hyper-soft">VPS</span>
           )}
+        </div>
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          <span
+            className={cn(
+              "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10.5px] font-medium",
+              tenant.businessMode === "ecommerce"
+                ? "border-gold/35 bg-gold/8 text-gold"
+                : "border-hyper/35 bg-hyper/8 text-hyper-soft",
+            )}
+          >
+            {tenant.businessMode === "ecommerce" ? (
+              <ShoppingBag aria-hidden className="size-3" />
+            ) : (
+              <Building2 aria-hidden className="size-3" />
+            )}
+            {tenant.businessMode === "ecommerce" ? "E-Commerce" : "General"}
+          </span>
+          <span className="rounded-md border border-white/12 px-1.5 py-0.5 text-[10.5px] font-medium text-ink-2">
+            {tenant.region === "bd" ? "BD" : "Global"} {CURRENCY_SYMBOLS[tenant.currency] ?? tenant.currency}
+          </span>
         </div>
         <a
           href={tenant.url}
@@ -176,6 +247,11 @@ const TenantRow = memo(function TenantRow({
           <span className="truncate">{tenant.url.startsWith("https") ? "https://" : "http://"}{host}</span>
           <ExternalLink aria-hidden className="size-3 shrink-0" />
         </a>
+      </div>
+
+      <div role="cell" className="min-w-0">
+        <CellLabel>7-step onboarding</CellLabel>
+        <OnboardingProgress stage={tenant.onboardingStage} />
       </div>
 
       <div role="cell" className="min-w-0">
@@ -219,7 +295,7 @@ const TenantRow = memo(function TenantRow({
       </div>
 
       <div role="cell" className="min-w-0">
-        <CellLabel>Loopback ports</CellLabel>
+        <CellLabel>Ports and skills</CellLabel>
         <div className="flex flex-wrap gap-1.5 font-mono text-[11px] tabular-nums tracking-tight">
           <span className="rounded-md border border-white/8 bg-white/3 px-1.5 py-0.5 text-ink-2">
             <span className="text-ink-3">DASH</span> 127.0.0.1:{tenant.ports.dash ?? "--"}
@@ -228,26 +304,38 @@ const TenantRow = memo(function TenantRow({
             <span className="text-ink-3">API</span> 127.0.0.1:{tenant.ports.api ?? "--"}
           </span>
         </div>
-      </div>
-
-      <div role="cell" className="min-w-0">
-        <CellLabel>Mounted skills</CellLabel>
         <span
           title={tenant.skills.join(", ") || "No skills synced"}
-          className="inline-flex items-center gap-1.5 rounded-md border border-hyper/30 bg-hyper/8 px-1.5 py-0.5 text-[11px] leading-snug text-hyper-soft"
+          className="mt-1.5 inline-flex items-center gap-1.5 rounded-md border border-hyper/30 bg-hyper/8 px-1.5 py-0.5 text-[11px] leading-snug text-hyper-soft"
         >
           <Layers aria-hidden className="size-3 shrink-0" />
           {skillCount} Agency Core {skillCount === 1 ? "Skill" : "Skills"} :ro
         </span>
       </div>
 
-      <div role="cell" className="flex items-center gap-0.5 sm:col-span-2 xl:col-span-1 xl:justify-end">
-        <RowAction
-          label="Copy client portal link"
-          icon={<Link2 aria-hidden className={cn("size-4", isMintingPortalLink && "animate-pulse")} />}
-          onClick={() => onCopyPortalLink(tenant)}
-          unavailableReason={isMintingPortalLink ? "Minting a link…" : null}
-        />
+      <div role="cell" className="flex flex-wrap items-center gap-0.5 sm:col-span-2 xl:col-span-1 xl:max-w-[10.5rem] xl:justify-end">
+        {can(PERMISSIONS.clientsWrite) && (
+          <RowAction
+            label="Manage onboarding and ROI"
+            icon={<SlidersHorizontal aria-hidden className="size-4" />}
+            onClick={() => onManage(tenant)}
+          />
+        )}
+        {can(PERMISSIONS.portalAny) && (
+          <RowAction
+            label="View this client's portal"
+            icon={<Eye aria-hidden className="size-4" />}
+            onClick={() => window.open(`/portal/${tenant.slug}`, "_blank", "noopener")}
+          />
+        )}
+        {can(PERMISSIONS.portalLinks) && (
+          <RowAction
+            label="Copy client portal link"
+            icon={<Link2 aria-hidden className={cn("size-4", isMintingPortalLink && "animate-pulse")} />}
+            onClick={() => onCopyPortalLink(tenant)}
+            unavailableReason={isMintingPortalLink ? "Minting a link…" : null}
+          />
+        )}
         <RowAction
           label="Copy dashboard credentials"
           icon={<UserRoundCheck aria-hidden className="size-4" />}
@@ -259,11 +347,13 @@ const TenantRow = memo(function TenantRow({
           onClick={copyApiKey}
           unavailableReason={tenant.secrets.apiKey ? null : "The hub returns the bearer key only at onboarding, so it cannot be copied here."}
         />
-        <RowAction
-          label="Open live terminal"
-          icon={<SquareTerminal aria-hidden className="size-4" />}
-          onClick={() => onOpenLogs(tenant)}
-        />
+        {can(PERMISSIONS.clientsLogs) && (
+          <RowAction
+            label="Open live terminal"
+            icon={<SquareTerminal aria-hidden className="size-4" />}
+            onClick={() => onOpenLogs(tenant)}
+          />
+        )}
         <RowAction
           label="Restart container"
           icon={<RotateCw aria-hidden className={cn("size-4", isRestarting && "animate-spin-slow")} />}
@@ -276,12 +366,14 @@ const TenantRow = memo(function TenantRow({
                 : null
           }
         />
-        <RowAction
-          label="Terminate instance"
-          tone="danger"
-          icon={<Power aria-hidden className="size-4" />}
-          onClick={() => onTerminate(tenant)}
-        />
+        {can(PERMISSIONS.terminate) && (
+          <RowAction
+            label="Terminate instance"
+            tone="danger"
+            icon={<Power aria-hidden className="size-4" />}
+            onClick={() => onTerminate(tenant)}
+          />
+        )}
       </div>
     </motion.div>
   );
@@ -298,6 +390,8 @@ export function TenantTable({
   onRestart,
   onTerminate,
   onCopyPortalLink,
+  onManage,
+  permissions,
 }: TenantTableProps) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
@@ -389,10 +483,10 @@ export function TenantTable({
           )}
         >
           <span role="columnheader">Tenant identity</span>
+          <span role="columnheader">7-step onboarding</span>
           <span role="columnheader">Container health</span>
-          <span role="columnheader">Loopback ports</span>
-          <span role="columnheader">Mounted skills</span>
-          <span role="columnheader" className="w-[12.5rem] text-right">
+          <span role="columnheader">Ports and skills</span>
+          <span role="columnheader" className="w-[10.5rem] text-right">
             Quick actions
           </span>
         </div>
@@ -416,6 +510,8 @@ export function TenantTable({
                 onRestart={onRestart}
                 onTerminate={onTerminate}
                 onCopyPortalLink={onCopyPortalLink}
+                onManage={onManage}
+                permissions={permissions}
               />
             ))}
           </AnimatePresence>

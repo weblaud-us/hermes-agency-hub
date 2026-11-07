@@ -58,11 +58,15 @@ from sqlalchemy.ext.asyncio import (  # noqa: E402
 )
 from sqlalchemy.pool import NullPool  # noqa: E402
 
+# Registered on Base.metadata here because db_engine creates the schema before
+# any test has had a reason to import them.
+from src.auth import models as _auth_models  # noqa: E402,F401
 from src.clients.models import Client, ClientPlan, SubscriptionStatus  # noqa: E402
 from src.clients.schemas import ClientCreate  # noqa: E402
 from src.clients.service import create_client  # noqa: E402
 from src.config.database import Base  # noqa: E402
 from src.config.settings import Settings  # noqa: E402
+from src.ops import models as _ops_models  # noqa: E402,F401
 from src.orchestrator.credentials import generate_tenant_credentials  # noqa: E402
 from src.orchestrator.docker_service import DockerService  # noqa: E402
 from src.orchestrator.provisioner import Provisioner  # noqa: E402
@@ -803,7 +807,7 @@ async def hub(tmp_path: Path, session_factory, monkeypatch) -> Hub:
     Four seams are replaced and nothing else:
 
     * ``get_session`` -> the test database.
-    * ``get_settings`` -> tmp-path settings (also what ``require_admin`` reads).
+    * ``get_settings`` -> tmp-path settings (also what ``get_principal`` reads).
     * the Docker SDK client -> :class:`FakeDockerClient`.
     * ``DockerService.probe`` -> :class:`ProbeStub`.
 

@@ -5,7 +5,10 @@ import {
   CheckCircle2,
   Globe2,
   Hash,
+  KeyRound,
   Mic,
+  Share2,
+  Sparkles,
   Plus,
   QrCode,
   RotateCw,
@@ -17,42 +20,44 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { ChannelConnectDrawer, type ConnectTarget } from "@/components/portal/ChannelConnectDrawer";
 import { Dialog } from "@/components/ui/Dialog";
 import { SpotlightCard } from "@/components/ui/SpotlightCard";
 import { StatusOrb, type OrbTone } from "@/components/ui/StatusOrb";
 import { useToast } from "@/components/ui/Toaster";
 import type { ChannelName, ChannelStatus, ChannelTestResult, PortalChannel, PortalClient, ReconnectResult } from "@/lib/portal-api";
-import { formatRelative } from "@/lib/portal-format";
+import { useI18n } from "@/lib/i18n";
+import type { MessageKey } from "@/lib/i18n-messages";
 import { SPRING } from "@/lib/motion";
-import { cn, formatInteger } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
-const CHANNEL_META: Record<ChannelName, { title: string; short: string; tiny: string; icon: LucideIcon; allowLabel: string; allowHint: string }> = {
+const CHANNEL_META: Record<ChannelName, { title: MessageKey; short: MessageKey; tiny: MessageKey; icon: LucideIcon; allowLabel: MessageKey; allowHint: string }> = {
   whatsapp: {
-    title: "WhatsApp Business Gateway",
-    short: "WhatsApp Business",
-    tiny: "WhatsApp",
+    title: "ch.whatsappTitle",
+    short: "ch.whatsappShort",
+    tiny: "ch.whatsappTiny",
     icon: Smartphone,
-    allowLabel: "Whitelisted staff numbers",
+    allowLabel: "ch.whatsappAllow",
     allowHint: "+8801712345678",
   },
   telegram: {
-    title: "Telegram Executive Voice & Text Bot",
-    short: "Telegram Executive Bot",
-    tiny: "Telegram",
+    title: "ch.telegramTitle",
+    short: "ch.telegramShort",
+    tiny: "ch.telegramTiny",
     icon: Send,
-    allowLabel: "Authorized user IDs",
+    allowLabel: "ch.telegramAllow",
     allowHint: "123456789",
   },
-  slack: { title: "Slack Workspace", short: "Slack", tiny: "Slack", icon: Hash, allowLabel: "Authorized members", allowHint: "U0123ABCD" },
-  web_widget: { title: "Storefront Webhook", short: "Storefront Webhook", tiny: "Storefront", icon: Globe2, allowLabel: "", allowHint: "" },
+  slack: { title: "ch.slackTitle", short: "ch.slackShort", tiny: "ch.slackShort", icon: Hash, allowLabel: "ch.slackAllow", allowHint: "U0123ABCD" },
+  web_widget: { title: "ch.webTitle", short: "ch.webTitle", tiny: "ch.webTiny", icon: Globe2, allowLabel: "ch.webTitle", allowHint: "" },
 };
 
-const STATUS_META: Record<ChannelStatus, { tone: OrbTone; label: string; className: string; stroke: string }> = {
-  connected: { tone: "signal", label: "Connected", className: "border-signal/30 bg-signal/10 text-signal", stroke: "var(--color-signal)" },
-  connecting: { tone: "muted", label: "Connecting", className: "border-hyper/40 bg-hyper/12 text-hyper-soft", stroke: "var(--color-hyper)" },
-  action_needed: { tone: "warn", label: "Action needed", className: "border-warn/35 bg-warn/10 text-warn", stroke: "var(--color-warn)" },
-  disconnected: { tone: "halt", label: "Disconnected", className: "border-halt/35 bg-halt/10 text-halt-soft", stroke: "var(--color-halt)" },
-  not_configured: { tone: "muted", label: "Not set up", className: "border-white/12 bg-white/4 text-ink-3", stroke: "rgb(255 255 255 / 0.2)" },
+const STATUS_META: Record<ChannelStatus, { tone: OrbTone; label: MessageKey; className: string; stroke: string }> = {
+  connected: { tone: "signal", label: "ch.statusConnected", className: "border-signal/30 bg-signal/10 text-signal", stroke: "var(--color-signal)" },
+  connecting: { tone: "muted", label: "ch.statusConnecting", className: "border-hyper/40 bg-hyper/12 text-hyper-soft", stroke: "var(--color-hyper)" },
+  action_needed: { tone: "warn", label: "ch.statusAction", className: "border-warn/35 bg-warn/10 text-warn", stroke: "var(--color-warn)" },
+  disconnected: { tone: "halt", label: "ch.statusDisconnected", className: "border-halt/35 bg-halt/10 text-halt-soft", stroke: "var(--color-halt)" },
+  not_configured: { tone: "muted", label: "ch.statusNotSetUp", className: "border-white/12 bg-white/4 text-ink-3", stroke: "rgb(255 255 255 / 0.2)" },
 };
 
 /** Faster, busier dashes for busier channels, so the diagram reflects real traffic. */
@@ -64,12 +69,13 @@ function flowFor(volume: number | null): { pulses: number; duration: number } {
 }
 
 function StatusBadge({ channel }: { channel: PortalChannel }) {
+  const { t } = useI18n();
   const meta = STATUS_META[channel.status];
   return (
     <span className={cn("inline-flex min-h-7 items-center gap-2 whitespace-nowrap rounded-full border px-2.5 font-mono text-[11px]", meta.className)}>
       <StatusOrb tone={meta.tone} pulse={channel.status === "connected"} />
-      {meta.label}
-      {channel.sessionVerified && <span className="text-ink-2">• Session Verified</span>}
+      {t(meta.label)}
+      {channel.sessionVerified && <span className="text-ink-2">• {t("ch.sessionVerified")}</span>}
     </span>
   );
 }
@@ -84,6 +90,7 @@ function GatewayBridge({
   active: ChannelName | null;
   onActivate: (channel: ChannelName | null) => void;
 }) {
+  const { t, number } = useI18n();
   const frame = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
 
@@ -101,14 +108,14 @@ function GatewayBridge({
 
   const total = channels.reduce((sum, channel) => sum + (channel.messages24h ?? 0), 0);
   const summary = channels
-    .map((channel) => `${CHANNEL_META[channel.channel].short}: ${STATUS_META[channel.status].label}`)
+    .map((channel) => `${t(CHANNEL_META[channel.channel].short)}: ${t(STATUS_META[channel.status].label)}`)
     .join(", ");
 
   return (
     <SpotlightCard className="overflow-hidden p-4 sm:p-6">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold text-ink">Gateway Bridge</h2>
-        <p className="font-mono text-xs tabular-nums text-ink-3">{formatInteger(total)} messages in the last 24h</p>
+        <h2 className="text-sm font-semibold text-ink">{t("ch.bridge")}</h2>
+        <p className="font-mono text-xs tabular-nums text-ink-3">{t("ch.messages24", { count: number(total) })}</p>
       </div>
 
       <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(28px,0.6fr)_auto] items-stretch sm:grid-cols-[minmax(0,240px)_minmax(80px,1fr)_auto]">
@@ -129,11 +136,11 @@ function GatewayBridge({
                   <Icon aria-hidden className="size-4 shrink-0 text-ink-2" />
                   <div className="min-w-0">
                     <p className="truncate text-xs font-medium text-ink">
-                      <span className="sm:hidden">{meta.tiny}</span>
-                      <span className="hidden sm:inline">{meta.short}</span>
+                      <span className="sm:hidden">{t(meta.tiny)}</span>
+                      <span className="hidden sm:inline">{t(meta.short)}</span>
                     </p>
                     <p className="truncate font-mono text-[11px] tabular-nums text-ink-3">
-                      {channel.messages24h != null ? `${formatInteger(channel.messages24h)} / 24h` : STATUS_META[channel.status].label}
+                      {channel.messages24h != null ? `${number(channel.messages24h)} / 24h` : t(STATUS_META[channel.status].label)}
                     </p>
                   </div>
                 </div>
@@ -146,7 +153,7 @@ function GatewayBridge({
           {size.width > 0 && (
             <svg
               role="img"
-              aria-label={`Message flow into your AI Coordinator. ${summary}.`}
+              aria-label={t("ch.flowLabel", { summary })}
               width={size.width}
               height={size.height}
               viewBox={`0 0 ${size.width} ${size.height}`}
@@ -202,7 +209,7 @@ function GatewayBridge({
             <span className="relative flex size-9 items-center justify-center rounded-full bg-signal/12">
               <StatusOrb tone="signal" className="size-2.5" />
             </span>
-            <p className="text-xs font-semibold leading-tight text-ink">Central AI Coordinator</p>
+            <p className="text-xs font-semibold leading-tight text-ink">{t("ch.central")}</p>
           </div>
         </div>
       </div>
@@ -218,6 +225,7 @@ function AllowlistEditor({
   channel: PortalChannel;
   onUpdate: (change: { add?: string[]; removeIds?: string[] }) => Promise<string | null>;
 }) {
+  const { t } = useI18n();
   const meta = CHANNEL_META[channel.channel];
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
@@ -245,16 +253,16 @@ function AllowlistEditor({
     return (
       <div className="mt-4 flex items-start gap-2 rounded-xl border border-warn/30 bg-warn/8 p-3 text-xs leading-relaxed text-ink-2">
         <ShieldAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-warn" />
-        <p>This channel currently answers anyone who messages it. Ask your account manager to restrict it.</p>
+        <p>{t("ch.allowAll")}</p>
       </div>
     );
   }
 
   return (
     <div className="mt-4 border-t border-white/7 pt-4">
-      <h4 className="text-xs font-medium text-ink-2">{meta.allowLabel}</h4>
+      <h4 className="text-xs font-medium text-ink-2">{t(meta.allowLabel)}</h4>
       {channel.allowlist.length === 0 ? (
-        <p className="mt-2 text-xs text-ink-3">Nobody yet. Only people listed here can message your Coordinator.</p>
+        <p className="mt-2 text-xs text-ink-3">{t("ch.allowEmpty")}</p>
       ) : (
         <ul className="mt-2 space-y-1">
           {channel.allowlist.map((entry) => (
@@ -264,7 +272,7 @@ function AllowlistEditor({
                 type="button"
                 disabled={busy}
                 onClick={() => void apply({ removeIds: [entry.id] })}
-                aria-label={`Remove ${entry.display}`}
+                aria-label={t("ch.remove", { item: entry.display })}
                 className="inline-flex size-9 shrink-0 items-center justify-center rounded-md text-ink-3 transition-colors hover:bg-halt/12 hover:text-halt-soft disabled:opacity-40"
               >
                 <Trash2 aria-hidden className="size-3.5" />
@@ -275,7 +283,7 @@ function AllowlistEditor({
       )}
       <form onSubmit={add} className="mt-2 flex gap-2">
         <label htmlFor={inputId} className="sr-only">
-          Add to {meta.allowLabel.toLowerCase()}
+          {t("ch.addTo", { list: t(meta.allowLabel) })}
         </label>
         <input
           id={inputId}
@@ -293,7 +301,7 @@ function AllowlistEditor({
           whileTap={{ scale: 0.95 }}
           transition={SPRING}
           disabled={!value.trim() || busy}
-          aria-label={`Add to ${meta.allowLabel.toLowerCase()}`}
+          aria-label={t("ch.addTo", { list: t(meta.allowLabel) })}
           className="inline-flex size-11 shrink-0 items-center justify-center rounded-xl border border-white/12 text-ink-2 transition-colors hover:border-white/25 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Plus aria-hidden className="size-4" />
@@ -338,6 +346,7 @@ function SampleCode() {
 }
 
 function ScannerFrame({ pairing, sample }: { pairing: ReconnectResult; sample: boolean }) {
+  const { t } = useI18n();
   return (
     <div className="relative mx-auto size-56">
       {[
@@ -352,7 +361,7 @@ function ScannerFrame({ pairing, sample }: { pairing: ReconnectResult; sample: b
         {pairing.qrPngBase64 ? (
           // A data URL produced by the backend: next/image has nothing to optimise here.
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={`data:image/png;base64,${pairing.qrPngBase64}`} alt="WhatsApp linking code" className="size-full" />
+          <img src={`data:image/png;base64,${pairing.qrPngBase64}`} alt={t("ch.qrAlt")} className="size-full" />
         ) : (
           <SampleCode />
         )}
@@ -364,7 +373,7 @@ function ScannerFrame({ pairing, sample }: { pairing: ReconnectResult; sample: b
       </div>
       {sample && (
         <span className="absolute inset-x-6 bottom-6 rounded-md bg-obsidian/90 px-2 py-1 text-center font-mono text-[11px] text-warn">
-          Sample, not scannable
+          {t("ch.sampleCode")}
         </span>
       )}
     </div>
@@ -384,6 +393,7 @@ function LinkDialogBody({
   onClose: () => void;
   onChanged: () => void;
 }) {
+  const { t, number } = useI18n();
   const meta = CHANNEL_META[channel.channel];
   // A live session holds its link open, so only a broken one can start a new pairing.
   // Sample mode has no session to collide with, and this is how the flow gets previewed.
@@ -422,7 +432,7 @@ function LinkDialogBody({
     try {
       setTest(await client.testChannel(channel.channel));
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : "The test could not run.");
+      setError(failure instanceof Error ? failure.message : t("ch.testFailed"));
     } finally {
       setTesting(false);
     }
@@ -436,7 +446,7 @@ function LinkDialogBody({
       setResult(next);
       if (next.state === "refreshing") onChanged();
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : "Could not reconnect this channel.");
+      setError(failure instanceof Error ? failure.message : t("ch.reconnectFailed"));
     } finally {
       setStarting(false);
     }
@@ -446,13 +456,13 @@ function LinkDialogBody({
     <div className="thin-scroll overflow-y-auto p-6">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="text-base font-semibold text-ink">{relinks ? "Re-link WhatsApp" : `Manage ${meta.short}`}</h2>
-          <p className="mt-1 font-mono text-xs text-ink-3">{channel.maskedHandle ?? "No account linked"}</p>
+          <h2 className="text-base font-semibold text-ink">{relinks ? t("ch.relinkTitle") : t("ch.manageTitle", { channel: t(meta.short) })}</h2>
+          <p className="mt-1 font-mono text-xs text-ink-3">{channel.maskedHandle ?? t("ch.noAccount")}</p>
         </div>
         <button
           type="button"
           onClick={onClose}
-          aria-label="Close"
+          aria-label={t("ch.close")}
           className="-mr-2 -mt-2 inline-flex size-10 shrink-0 items-center justify-center rounded-lg text-ink-2 hover:bg-white/6 hover:text-ink"
         >
           <X aria-hidden className="size-4" />
@@ -465,13 +475,13 @@ function LinkDialogBody({
             <ScannerFrame pairing={result} sample={client.mode === "mock"} />
           ) : (
             <div role="status" className="mx-auto flex size-56 items-center justify-center rounded-xl border border-white/10 bg-white/3 text-xs text-ink-3">
-              Preparing a secure code...
+              {t("ch.preparing")}
             </div>
           )}
           <p className="mt-4 text-center text-sm leading-relaxed text-ink-2">{result.detail}</p>
           {result.qrRefreshSeconds != null && (
             <p className="mt-1 text-center font-mono text-xs tabular-nums text-ink-3">
-              Code refreshes about every 20 seconds
+              {t("ch.qrRefresh")}
             </p>
           )}
         </div>
@@ -504,7 +514,7 @@ function LinkDialogBody({
         >
           <p>{test.detail}</p>
           {test.latencyMs != null && (
-            <p className="mt-1 font-mono text-xs tabular-nums text-ink-3">Round trip {Math.round(test.latencyMs)}ms</p>
+            <p className="mt-1 font-mono text-xs tabular-nums text-ink-3">{t("ch.roundTrip", { ms: number(Math.round(test.latencyMs)) })}</p>
           )}
         </div>
       )}
@@ -517,8 +527,7 @@ function LinkDialogBody({
 
       {!relinks && !result && (
         <p className="mt-4 text-xs leading-relaxed text-ink-3">
-          Refreshing reconnects your Coordinator to all of its channels. It usually takes under a minute, and messages sent
-          during that time are answered once it is back.
+          {t("ch.refreshNote")}
         </p>
       )}
 
@@ -532,7 +541,7 @@ function LinkDialogBody({
           className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/12 px-4 text-sm font-medium text-ink transition-colors hover:border-white/25 disabled:opacity-50"
         >
           <Send aria-hidden className="size-4" />
-          {testing ? "Testing..." : channel.channel === "telegram" ? "Send test message" : "Test ping"}
+          {testing ? t("ch.testing") : channel.channel === "telegram" ? t("ch.sendTest") : t("ch.testPing")}
         </motion.button>
         {!waiting && (
           <motion.button
@@ -544,7 +553,7 @@ function LinkDialogBody({
             className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-signal px-4 text-sm font-semibold text-obsidian disabled:opacity-50"
           >
             {relinks ? <QrCode aria-hidden className="size-4" /> : <RotateCw aria-hidden className="size-4" />}
-            {starting ? "Starting..." : relinks ? "Show QR code" : "Refresh connection"}
+            {starting ? t("ch.starting") : relinks ? t("ch.showQr") : t("ch.refreshConnection")}
           </motion.button>
         )}
       </div>
@@ -559,6 +568,7 @@ function ChannelCard({
   highlighted,
   onHover,
   onManage,
+  onConfigure,
   onUpdateAllowlist,
 }: {
   client: PortalClient;
@@ -566,8 +576,11 @@ function ChannelCard({
   highlighted: boolean;
   onHover: (channel: ChannelName | null) => void;
   onManage: () => void;
+  /** Opens the credentials drawer. Only WhatsApp and Telegram have one. */
+  onConfigure?: () => void;
   onUpdateAllowlist: (change: { add?: string[]; removeIds?: string[] }) => Promise<string | null>;
 }) {
+  const { t, number, relative } = useI18n();
   const meta = CHANNEL_META[channel.channel];
   const Icon = meta.icon;
   const hasAllowlist = channel.channel !== "web_widget";
@@ -582,7 +595,7 @@ function ChannelCard({
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2.5">
             <Icon aria-hidden className="size-4 shrink-0 text-ink-2" />
-            <h3 className="text-sm font-semibold text-ink">{meta.title}</h3>
+            <h3 className="text-sm font-semibold text-ink">{t(meta.title)}</h3>
           </div>
           <StatusBadge channel={channel} />
         </div>
@@ -596,25 +609,25 @@ function ChannelCard({
 
         <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-xs">
           <div className="col-span-2">
-            <dt className="text-ink-3">{channel.channel === "whatsapp" ? "Linked number" : channel.channel === "web_widget" ? "Source" : "Linked account"}</dt>
-            <dd className="mt-1 truncate font-mono text-[13px] tabular-nums text-ink">{channel.maskedHandle ?? "Not linked"}</dd>
+            <dt className="text-ink-3">{channel.channel === "whatsapp" ? t("ch.linkedNumber") : channel.channel === "web_widget" ? t("ch.source") : t("ch.linkedAccount")}</dt>
+            <dd className="mt-1 truncate font-mono text-[13px] tabular-nums text-ink">{channel.maskedHandle ?? t("ch.notLinked")}</dd>
           </div>
           <div>
-            <dt className="text-ink-3">Messages (24h)</dt>
+            <dt className="text-ink-3">{t("ch.messagesLabel")}</dt>
             <dd className="mt-1 font-mono text-[13px] tabular-nums text-ink">
-              {channel.messages24h != null ? formatInteger(channel.messages24h) : "--"}
+              {channel.messages24h != null ? number(channel.messages24h) : "--"}
             </dd>
           </div>
           <div>
-            <dt className="text-ink-3">Last message</dt>
-            <dd className="mt-1 font-mono text-[13px] tabular-nums text-ink">{formatRelative(channel.lastMessageAt)}</dd>
+            <dt className="text-ink-3">{t("ch.lastMessage")}</dt>
+            <dd className="mt-1 font-mono text-[13px] tabular-nums text-ink">{relative(channel.lastMessageAt)}</dd>
           </div>
           {channel.voiceTranscription !== null && (
             <div className="col-span-2">
-              <dt className="sr-only">Voice notes</dt>
+              <dt className="sr-only">{t("ch.voiceNotes")}</dt>
               <dd className="inline-flex items-center gap-1.5 text-ink-2">
                 <Mic aria-hidden className={cn("size-3.5", channel.voiceTranscription ? "text-signal" : "text-ink-3")} />
-                Voice-note transcription: {channel.voiceTranscription ? "Active" : "Off"}
+                {channel.voiceTranscription ? t("ch.voiceActive") : t("ch.voiceOff")}
               </dd>
             </div>
           )}
@@ -636,12 +649,30 @@ function ChannelCard({
             )}
           >
             {channel.channel === "whatsapp" ? <QrCode aria-hidden className="size-4" /> : <RotateCw aria-hidden className="size-4" />}
-            {channel.channel === "whatsapp" ? "Re-link QR / Test Ping" : channel.channel === "telegram" ? "Test / Reconnect" : "Reconnect"}
+            {channel.channel === "whatsapp" ? t("ch.relinkAction") : channel.channel === "telegram" ? t("ch.testReconnect") : t("ch.reconnect")}
           </motion.button>
         ) : (
-          <p className="mt-4 text-xs leading-relaxed text-ink-3">
-            {client.mode === "mock" ? "Available on request." : "Your account manager can enable this channel for you."}
-          </p>
+          !onConfigure && (
+            <p className="mt-4 text-xs leading-relaxed text-ink-3">
+              {client.mode === "mock" ? t("ch.onRequest") : t("ch.managerEnable")}
+            </p>
+          )
+        )}
+
+        {onConfigure && (
+          <motion.button
+            type="button"
+            whileTap={{ scale: 0.98 }}
+            transition={SPRING}
+            onClick={onConfigure}
+            className={cn(
+              "mt-2.5 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition-colors",
+              configured ? "border border-white/12 text-ink-2 hover:border-white/25 hover:text-ink" : "bg-signal text-obsidian",
+            )}
+          >
+            <KeyRound aria-hidden className="size-4" />
+            Connect & configure credentials
+          </motion.button>
         )}
       </SpotlightCard>
     </div>
@@ -649,20 +680,22 @@ function ChannelCard({
 }
 
 export function ChannelsMatrix({ client }: { client: PortalClient }) {
+  const { t } = useI18n();
   const notify = useToast();
   const [channels, setChannels] = useState<PortalChannel[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [active, setActive] = useState<ChannelName | null>(null);
   const [managing, setManaging] = useState<ChannelName | null>(null);
+  const [connecting, setConnecting] = useState<ConnectTarget | null>(null);
 
   const load = useCallback(async () => {
     try {
       setChannels(await client.channels());
       setError(null);
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : "Could not load your channels.");
+      setError(failure instanceof Error ? failure.message : t("ch.loadError"));
     }
-  }, [client]);
+  }, [client, t]);
 
   useEffect(() => {
     let cancelled = false;
@@ -681,16 +714,16 @@ export function ChannelsMatrix({ client }: { client: PortalClient }) {
   async function updateAllowlist(channel: ChannelName, change: { add?: string[]; removeIds?: string[] }) {
     try {
       setChannels(await client.updateAllowlist(channel, change));
-      notify(change.add?.length ? "Added to the approved list." : "Removed from the approved list.");
+      notify(change.add?.length ? t("ch.added") : t("ch.removed"));
       return null;
     } catch (failure) {
-      return failure instanceof Error ? failure.message : "That change could not be saved.";
+      return failure instanceof Error ? failure.message : t("ch.saveFailed");
     }
   }
 
   if (!channels) {
     if (error) return <LoadError message={error} onRetry={load} />;
-    return <div aria-busy="true" aria-label="Loading channels" className="h-96 animate-pulse rounded-3xl bg-white/3" />;
+    return <div aria-busy="true" aria-label={t("common.loading")} className="h-96 animate-pulse rounded-3xl bg-white/3" />;
   }
 
   const bridge = channels.filter((channel) => channel.status !== "not_configured" || channel.channel !== "slack");
@@ -709,12 +742,44 @@ export function ChannelsMatrix({ client }: { client: PortalClient }) {
             highlighted={active === channel.channel}
             onHover={setActive}
             onManage={() => setManaging(channel.channel)}
+            onConfigure={
+              channel.channel === "whatsapp" || channel.channel === "telegram"
+                ? () => setConnecting(channel.channel as ConnectTarget)
+                : undefined
+            }
             onUpdateAllowlist={(change) => updateAllowlist(channel.channel, change)}
           />
         ))}
       </div>
 
-      <Dialog open={managed !== null} onClose={() => setManaging(null)} title="Manage channel" className="sm:max-w-md">
+      <div className="grid gap-3 md:grid-cols-2">
+        <SetupCard
+          icon={<Share2 aria-hidden className="size-4 text-ink-2" />}
+          title="Facebook & Instagram"
+          body="Connect your Page and Instagram account so the Social Autopilot publishes to them and answers comments."
+          onOpen={() => setConnecting("meta")}
+        />
+        <SetupCard
+          icon={<Sparkles aria-hidden className="size-4 text-ink-2" />}
+          title="AI model preset"
+          body="Choose how your Coordinator balances answer quality against monthly cost."
+          onOpen={() => setConnecting("ai")}
+        />
+      </div>
+
+      <ChannelConnectDrawer
+        client={client}
+        target={connecting}
+        onClose={() => setConnecting(null)}
+        onChanged={load}
+        qrAvailable={channels.find((channel) => channel.channel === "whatsapp")?.status !== "not_configured"}
+        onOpenQr={() => {
+          setConnecting(null);
+          setManaging("whatsapp");
+        }}
+      />
+
+      <Dialog open={managed !== null} onClose={() => setManaging(null)} title={t("ch.manageChannel")} className="sm:max-w-md">
         {managed && (
           <LinkDialogBody
             key={managed.channel}
@@ -729,7 +794,30 @@ export function ChannelsMatrix({ client }: { client: PortalClient }) {
   );
 }
 
+function SetupCard({ icon, title, body, onOpen }: { icon: React.ReactNode; title: string; body: string; onOpen: () => void }) {
+  return (
+    <SpotlightCard className="rounded-2xl p-5">
+      <div className="flex items-center gap-2.5">
+        {icon}
+        <h3 className="text-sm font-semibold text-ink">{title}</h3>
+      </div>
+      <p className="mt-2 text-xs leading-relaxed text-ink-3">{body}</p>
+      <motion.button
+        type="button"
+        whileTap={{ scale: 0.98 }}
+        transition={SPRING}
+        onClick={onOpen}
+        className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-white/12 px-4 text-sm font-medium text-ink transition-colors hover:border-white/25"
+      >
+        <KeyRound aria-hidden className="size-4" />
+        Connect & configure credentials
+      </motion.button>
+    </SpotlightCard>
+  );
+}
+
 function LoadError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  const { t } = useI18n();
   return (
     <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-halt/30 bg-halt/8 px-4 py-3 text-sm text-halt-soft">
       <p>{message}</p>
@@ -739,7 +827,7 @@ function LoadError({ message, onRetry }: { message: string; onRetry: () => void 
         className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-halt/40 px-3 font-medium hover:border-halt/70"
       >
         <RotateCw aria-hidden className="size-3.5" />
-        Try again
+        {t("common.retry")}
       </button>
     </div>
   );

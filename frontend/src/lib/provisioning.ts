@@ -1,18 +1,35 @@
+import type { BaselineMetrics } from "./hub-types";
 import { shellQuote } from "./utils";
 
-export const BRAND = "Hermes Agency Hub";
+export const BRAND = "Weblaud";
+export const TAGLINE = "One Partner. One Growth System.";
 
 export const BASE_DOMAIN = process.env.NEXT_PUBLIC_BASE_DOMAIN || "agents.agency.com";
 
 export type TierId = "starter" | "growth" | "enterprise";
-/** The hub's plan enum. "Dedicated Enterprise" is sold on its `scale` plan. */
+/** The hub's plan enum, which sets a tenant's resources. */
 export type ApiPlan = "starter" | "growth" | "scale";
+/** What Weblaud sells. Each package maps onto one plan. */
+export type PackageTier = "presence" | "growth" | "scale";
+export type BusinessMode = "general" | "ecommerce";
+export type RegionPreset = "bd" | "global";
+export type NicheTemplate =
+  | "dental_clinic"
+  | "beauty_salon"
+  | "restaurant"
+  | "travel_agency"
+  | "ecommerce_store"
+  | "custom";
 
 export interface Tier {
   id: TierId;
   label: string;
+  /** What Weblaud sells it as, e.g. "Weblaud Presence". */
+  name: string;
   apiPlan: ApiPlan;
   monthly: number;
+  /** One-time onboarding fee, in USD. */
+  setup: number;
   memory: string;
   memoryGb: number;
   cpus: string;
@@ -22,9 +39,11 @@ export interface Tier {
 export const TIERS: Record<TierId, Tier> = {
   starter: {
     id: "starter",
-    label: "Starter",
+    label: "Presence",
+    name: "Weblaud Presence",
     apiPlan: "starter",
     monthly: 299,
+    setup: 499,
     memory: "1GB",
     memoryGb: 1,
     cpus: "0.5",
@@ -33,8 +52,10 @@ export const TIERS: Record<TierId, Tier> = {
   growth: {
     id: "growth",
     label: "Growth",
+    name: "Weblaud Growth",
     apiPlan: "growth",
-    monthly: 699,
+    monthly: 599,
+    setup: 999,
     memory: "2GB",
     memoryGb: 2,
     cpus: "1.0",
@@ -42,9 +63,11 @@ export const TIERS: Record<TierId, Tier> = {
   },
   enterprise: {
     id: "enterprise",
-    label: "Dedicated Enterprise",
+    label: "Scale",
+    name: "Weblaud Scale",
     apiPlan: "scale",
-    monthly: 1500,
+    monthly: 999,
+    setup: 1999,
     memory: "4GB",
     memoryGb: 4,
     cpus: "2.0",
@@ -58,17 +81,67 @@ export function tierFromPlan(plan: ApiPlan): TierId {
   return plan === "scale" ? "enterprise" : plan;
 }
 
+export const PACKAGE_FOR_TIER: Record<TierId, PackageTier> = {
+  starter: "presence",
+  growth: "growth",
+  enterprise: "scale",
+};
+
+export const TIER_FOR_PACKAGE: Record<PackageTier, TierId> = {
+  presence: "starter",
+  growth: "growth",
+  scale: "enterprise",
+};
+
+export const NICHE_OPTIONS: { value: NicheTemplate; label: string; mode: BusinessMode }[] = [
+  { value: "dental_clinic", label: "Dental Clinic", mode: "general" },
+  { value: "beauty_salon", label: "Beauty Salon & Spa", mode: "general" },
+  { value: "restaurant", label: "Restaurant", mode: "general" },
+  { value: "travel_agency", label: "Travel Agency", mode: "general" },
+  { value: "ecommerce_store", label: "E-Commerce Brand", mode: "ecommerce" },
+  { value: "custom", label: "Custom", mode: "general" },
+];
+
+export const REGION_CURRENCIES: Record<RegionPreset, string[]> = {
+  bd: ["BDT"],
+  global: ["USD", "EUR", "GBP"],
+};
+
+export const CURRENCY_SYMBOLS: Record<string, string> = { BDT: "৳", USD: "$", EUR: "€", GBP: "£" };
+
+export const ONBOARDING_STEPS = [
+  "Discovery",
+  "Knowledge Base",
+  "Connect Channels",
+  "Brand Kit",
+  "Spin Up Instance",
+  "Shadow Week QA",
+  "Autonomous Live",
+] as const;
+
+export const SHADOW_WEEK_STAGE = 6;
+
 export const LLM_MODELS = [
   { id: "anthropic/claude-sonnet-5.5", label: "Claude Sonnet 5.5" },
   { id: "deepseek/deepseek-chat", label: "DeepSeek Chat" },
   { id: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro" },
 ] as const;
 
-export const SHARED_SKILLS = [
-  { id: "ecommerce-lookup", label: "E-Commerce Order Lookup" },
-  { id: "lead-qualification", label: "WhatsApp Lead Qualifier" },
-  { id: "daily-executive-briefing", label: "Daily Executive Briefing" },
-] as const;
+/** The agency library. `ecommerceOnly` skills are only ever given to e-commerce clients. */
+export const SHARED_SKILLS: { id: string; label: string; ecommerceOnly?: boolean }[] = [
+  { id: "designer-brand-studio", label: "Designer" },
+  { id: "video-reel-editor", label: "Video Editor" },
+  { id: "social-media-autopilot", label: "Social Media Autopilot" },
+  { id: "sales-rep-inbox", label: "Sales Rep" },
+  { id: "ads-growth-manager", label: "Ads Manager" },
+  { id: "email-outreach-assistant", label: "Email Assistant" },
+  { id: "web-seo-manager", label: "Web Manager" },
+  { id: "roi-weekly-reporter", label: "Reporter" },
+  { id: "lead-qualification", label: "Lead Qualifier" },
+  { id: "order-desk-ecommerce", label: "Order Desk", ecommerceOnly: true },
+  { id: "catalog-keeper-ecommerce", label: "Catalog Keeper", ecommerceOnly: true },
+  { id: "ecommerce-lookup", label: "Order Lookup", ecommerceOnly: true },
+];
 
 export interface ProvisionForm {
   companyName: string;
@@ -78,14 +151,35 @@ export interface ProvisionForm {
   openRouterKey: string;
   sslEmail: string;
   skills: string[];
+  businessMode: BusinessMode;
+  nicheTemplate: NicheTemplate;
+  region: RegionPreset;
+  currency: string;
+  /** Kept as typed. All blank means "no baseline yet", which the hub allows. */
+  baselineInquiries: string;
+  baselineConversion: string;
+  baselineValue: string;
+  baselineRetainer: string;
+  /** Hex, with the leading #. The primary colour of the client's brand kit. */
+  brandPrimary: string;
+  /** On: the social autopilot publishes by itself. Off: the owner approves each post. */
+  autopilotSocial: boolean;
 }
 
-export type ProvisionField = "companyName" | "subdomain" | "openRouterKey" | "sslEmail";
+export type ProvisionField =
+  | "companyName"
+  | "subdomain"
+  | "openRouterKey"
+  | "sslEmail"
+  | "baseline"
+  | "brandPrimary";
 export type FieldErrors = Partial<Record<ProvisionField, string>>;
 
 const SUBDOMAIN_PATTERN = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const OPENROUTER_KEY_PATTERN = /^sk-or-v1-[A-Za-z0-9_-]{8,}$/;
+export const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
+export const DEFAULT_BRAND_PRIMARY = "#00F5D4";
 /** Same set as RESERVED_SLUGS in backend/src/clients/service.py. */
 const RESERVED_SUBDOMAINS = new Set([
   "www",
@@ -121,7 +215,31 @@ export function validateProvisionForm(
   if (!EMAIL_PATTERN.test(form.sslEmail.trim()))
     errors.sslEmail = "Enter a valid email address for certificate notices.";
 
+  if (!HEX_COLOR_PATTERN.test(form.brandPrimary.trim()))
+    errors.brandPrimary = "Use a six-digit hex colour such as #00F5D4.";
+
+  const baseline = [form.baselineInquiries, form.baselineConversion, form.baselineValue, form.baselineRetainer];
+  if (baseline.some((value) => value.trim() !== "")) {
+    const numbers = baseline.map(Number);
+    if (baseline.some((value) => value.trim() === "") || numbers.some((value) => !Number.isFinite(value) || value < 0)) {
+      errors.baseline = "Fill in all four baseline figures, or leave them all blank to add them later.";
+    } else if (numbers[1] > 100) {
+      errors.baseline = "Conversion rate is a percentage, so it cannot be above 100.";
+    }
+  }
+
   return errors;
+}
+
+/** The form's baseline as figures, or null when it was left blank. */
+export function baselineFromForm(form: ProvisionForm): BaselineMetrics | null {
+  if (form.baselineInquiries.trim() === "") return null;
+  return {
+    monthlyInquiries: Math.round(Number(form.baselineInquiries)),
+    conversionRate: Number(form.baselineConversion),
+    avgOrderOrProfitValue: Number(form.baselineValue),
+    monthlyRetainerInvestment: Number(form.baselineRetainer),
+  };
 }
 
 /**
