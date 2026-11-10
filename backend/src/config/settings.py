@@ -259,6 +259,9 @@ class Settings(BaseSettings):
     portal_minutes_per_task: float = 2.7
     #: An agent turn can run tools for a while before it answers.
     portal_chat_timeout_seconds: float = 120.0
+    #: Lets the owner link WhatsApp by QR code even before the channel has ever
+    #: been set up. Switch off to leave first-time linking to the account manager.
+    whatsapp_pairing_enabled: bool = True
     #: The agent's WhatsApp pairing process, as paths inside a tenant container.
     whatsapp_bridge_script: str = "/opt/hermes/scripts/whatsapp-bridge/bridge.js"
     whatsapp_session_path: str = "/opt/data/platforms/whatsapp/session"

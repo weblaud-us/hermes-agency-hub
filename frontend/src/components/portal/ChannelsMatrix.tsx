@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { ChannelConnectDrawer, type ConnectTarget } from "@/components/portal/ChannelConnectDrawer";
+import { ScannerFrame, SimulateScanButton } from "@/components/portal/WhatsAppQr";
 import { Dialog } from "@/components/ui/Dialog";
 import { SpotlightCard } from "@/components/ui/SpotlightCard";
 import { StatusOrb, type OrbTone } from "@/components/ui/StatusOrb";
@@ -317,69 +318,6 @@ function AllowlistEditor({
 }
 
 // ------------------------------------------------------------------ the link dialog
-/** A placeholder pattern for sample mode, drawn so it cannot be mistaken for a real code. */
-function SampleCode() {
-  const size = 25;
-  const inFinder = (x: number, y: number) => (x < 7 || x >= size - 7) && (y < 7 || (y >= size - 7 && x < 7));
-  const cells: React.ReactNode[] = [];
-  for (let y = 0; y < size; y += 1) {
-    for (let x = 0; x < size; x += 1) {
-      if (inFinder(x, y)) continue;
-      if ((x * y + x * 3 + y * 7) % 5 < 2) cells.push(<rect key={`${x}-${y}`} x={x} y={y} width="1" height="1" />);
-    }
-  }
-  const finder = (x: number, y: number) => (
-    <g key={`${x}-${y}`}>
-      <rect x={x} y={y} width="7" height="7" />
-      <rect x={x + 1} y={y + 1} width="5" height="5" fill="#fff" />
-      <rect x={x + 2} y={y + 2} width="3" height="3" />
-    </g>
-  );
-  return (
-    <svg aria-hidden viewBox={`0 0 ${size} ${size}`} className="size-full" shapeRendering="crispEdges" fill="#050508">
-      {cells}
-      {finder(0, 0)}
-      {finder(size - 7, 0)}
-      {finder(0, size - 7)}
-    </svg>
-  );
-}
-
-function ScannerFrame({ pairing, sample }: { pairing: ReconnectResult; sample: boolean }) {
-  const { t } = useI18n();
-  return (
-    <div className="relative mx-auto size-56">
-      {[
-        "left-0 top-0 border-l-2 border-t-2 rounded-tl-xl",
-        "right-0 top-0 border-r-2 border-t-2 rounded-tr-xl",
-        "bottom-0 left-0 border-b-2 border-l-2 rounded-bl-xl",
-        "bottom-0 right-0 border-b-2 border-r-2 rounded-br-xl",
-      ].map((corner) => (
-        <span key={corner} aria-hidden className={cn("absolute size-7 border-signal", corner)} />
-      ))}
-      <div className="absolute inset-3 overflow-hidden rounded-lg bg-white p-2">
-        {pairing.qrPngBase64 ? (
-          // A data URL produced by the backend: next/image has nothing to optimise here.
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={`data:image/png;base64,${pairing.qrPngBase64}`} alt={t("ch.qrAlt")} className="size-full" />
-        ) : (
-          <SampleCode />
-        )}
-        <span
-          aria-hidden
-          className="scan-line absolute inset-x-1 top-1 h-0.5 rounded-full bg-signal shadow-[0_0_12px_var(--color-signal)]"
-          style={{ "--scan-distance": "188px" } as React.CSSProperties}
-        />
-      </div>
-      {sample && (
-        <span className="absolute inset-x-6 bottom-6 rounded-md bg-obsidian/90 px-2 py-1 text-center font-mono text-[11px] text-warn">
-          {t("ch.sampleCode")}
-        </span>
-      )}
-    </div>
-  );
-}
-
 const PAIRING_POLL_MS = 3000;
 
 function LinkDialogBody({
@@ -543,6 +481,15 @@ function LinkDialogBody({
           <Send aria-hidden className="size-4" />
           {testing ? t("ch.testing") : channel.channel === "telegram" ? t("ch.sendTest") : t("ch.testPing")}
         </motion.button>
+        {waiting && (
+          <SimulateScanButton
+            client={client}
+            onResult={(next) => {
+              setResult(next);
+              onChanged();
+            }}
+          />
+        )}
         {!waiting && (
           <motion.button
             type="button"
@@ -772,11 +719,7 @@ export function ChannelsMatrix({ client }: { client: PortalClient }) {
         target={connecting}
         onClose={() => setConnecting(null)}
         onChanged={load}
-        qrAvailable={channels.find((channel) => channel.channel === "whatsapp")?.status !== "not_configured"}
-        onOpenQr={() => {
-          setConnecting(null);
-          setManaging("whatsapp");
-        }}
+        whatsappStatus={channels.find((channel) => channel.channel === "whatsapp")?.status ?? "not_configured"}
       />
 
       <Dialog open={managed !== null} onClose={() => setManaging(null)} title={t("ch.manageChannel")} className="sm:max-w-md">

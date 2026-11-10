@@ -1078,6 +1078,27 @@ class TestChannels:
         assert started == ["suvana"]
         assert container.restart_calls == []
 
+    def test_first_whatsapp_link_starts_pairing_by_default(self, portal: Portal, monkeypatch):
+        started = []
+
+        def fake_start(client, docker, settings):
+            started.append(client.slug)
+            return PairingSession()
+
+        monkeypatch.setattr(pairing_module.pairing_registry, "start", fake_start)
+        write(portal.root / "gateway_state.json", json.dumps({"platforms": {}}))
+        assert self.channel(portal, "whatsapp")["status"] == "not_configured"
+        response = portal.post("/channels/whatsapp/reconnect")
+        assert response.json()["state"] == "qr_pending"
+        assert started == ["suvana"]
+
+    def test_first_whatsapp_link_can_be_left_to_the_account_manager(self, portal: Portal, monkeypatch):
+        monkeypatch.setattr(portal.hub.settings, "whatsapp_pairing_enabled", False)
+        write(portal.root / "gateway_state.json", json.dumps({"platforms": {}}))
+        response = portal.post("/channels/whatsapp/reconnect")
+        assert response.json()["state"] == "failed"
+        assert "account manager" in response.json()["detail"]
+
     def test_unknown_channel_is_rejected(self, portal: Portal):
         assert portal.post("/channels/discord/reconnect").status_code == 422
 
@@ -1108,12 +1129,20 @@ class TestPairing:
         assert session.state == "qr_ready"
         assert base64.b64decode(session.qr_png_base64()).startswith(b"\x89PNG\r\n")
 
+    def test_qr_event_yields_a_square_module_matrix(self):
+        session = PairingSession()
+        apply_pair_event(session, {"event": "qr", "qr": "2@abc,def,ghi"})
+        rows = session.qr_matrix()
+        assert rows and all(len(row) == len(rows) for row in rows)
+        assert set("".join(rows)) == {"0", "1"}
+
     def test_error_and_connect_events_clear_the_qr(self):
         for event, state in (({"event": "error", "error": "x"}, "failed"), ({"event": "connected"}, "connected")):
             session = PairingSession(state="qr_ready", qr_payload="old")
             apply_pair_event(session, event)
             assert session.state == state
             assert session.qr_png_base64() is None
+            assert session.qr_matrix() is None
 
     def test_runs_as_the_agents_user_and_restarts_after_linking(self, settings):
         calls = {}

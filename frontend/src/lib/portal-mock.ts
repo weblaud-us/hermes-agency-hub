@@ -18,14 +18,15 @@ import { ApiError } from "./hub-types";
 import { createMockKnowledge } from "./knowledge-mock";
 import { createGrowthMock } from "./portal-growth-mock";
 import { createSocialMock } from "./portal-social-mock";
+import { sampleQrMatrix } from "./sample-qr";
 import { delay } from "./utils";
 
 const DAY = 86_400_000;
 const HOUR = 3_600_000;
 const MEMORY_LIMIT = 2200;
 const QR_SECONDS = 20;
-/** How long sample re-linking takes to "complete", so the waiting state can be seen. */
-const SAMPLE_PAIRING_MS = 9000;
+/** The number a sample phone scan links, so the connected state is easy to recognise in a demo. */
+const SAMPLE_LINKED_HANDLE = "+1 (555) 019-2834";
 
 interface SkillSeed {
   id: string;
@@ -379,6 +380,7 @@ export function createMockPortal(subdomain: string): PortalClient {
   let staff = profile.whatsapp.staff.map(([id, display]) => ({ id, display }));
   let telegramIds = profile.telegram.ids.map(([id, display]) => ({ id, display }));
   let whatsappStatus: PortalChannel["status"] = "connected";
+  let whatsappHandle = profile.whatsapp.handle;
   let pairingStartedAt: number | null = null;
   let nextEntry = 1;
 
@@ -425,7 +427,7 @@ export function createMockPortal(subdomain: string): PortalClient {
         channel: "whatsapp",
         status: whatsappStatus,
         sessionVerified: whatsappStatus === "connected",
-        maskedHandle: profile.whatsapp.handle,
+        maskedHandle: whatsappHandle,
         lastMessageAt: lastMessage,
         messages24h: profile.whatsapp.volume,
         allowlist: staff,
@@ -462,24 +464,16 @@ export function createMockPortal(subdomain: string): PortalClient {
 
   const pairingView = (): ReconnectResult => {
     if (pairingStartedAt === null) {
-      return { state: "failed", qrPngBase64: null, qrRefreshSeconds: null, detail: "No re-link is in progress." };
+      return { state: "failed", qrPngBase64: null, qrMatrix: null, qrRefreshSeconds: null, detail: "No re-link is in progress." };
     }
-    const elapsed = Date.now() - pairingStartedAt;
-    if (elapsed < SAMPLE_PAIRING_MS) {
-      return {
-        state: "qr_ready",
-        qrPngBase64: null,
-        qrRefreshSeconds: Math.max(0, QR_SECONDS - Math.floor(elapsed / 1000)),
-        detail: "On your phone, open WhatsApp, go to Linked Devices, and scan this code.",
-      };
-    }
-    whatsappStatus = "connected";
-    pairingStartedAt = null;
+    // The sample code waits for a simulated scan, so it stays up for as long as a demo needs.
+    const elapsed = Math.floor((Date.now() - pairingStartedAt) / 1000);
     return {
-      state: "connected",
+      state: "qr_ready",
       qrPngBase64: null,
-      qrRefreshSeconds: null,
-      detail: "WhatsApp is linked. Your Coordinator is reconnecting now.",
+      qrMatrix: sampleQrMatrix(),
+      qrRefreshSeconds: QR_SECONDS - (elapsed % QR_SECONDS),
+      detail: "On your phone, open WhatsApp, go to Linked Devices, and scan this code.",
     };
   };
 
@@ -525,6 +519,7 @@ export function createMockPortal(subdomain: string): PortalClient {
       return {
         state: "refreshing",
         qrPngBase64: null,
+        qrMatrix: null,
         qrRefreshSeconds: null,
         detail: "Your Coordinator is reconnecting. This usually takes under a minute.",
       };
@@ -533,6 +528,20 @@ export function createMockPortal(subdomain: string): PortalClient {
     async pairingStatus() {
       await delay(120);
       return pairingView();
+    },
+
+    async simulatePhoneScan() {
+      await delay(700);
+      pairingStartedAt = null;
+      whatsappStatus = "connected";
+      whatsappHandle = SAMPLE_LINKED_HANDLE;
+      return {
+        state: "connected",
+        qrPngBase64: null,
+        qrMatrix: null,
+        qrRefreshSeconds: null,
+        detail: "WhatsApp is linked. Your Coordinator is reconnecting now.",
+      };
     },
 
     async testChannel(channel: ChannelName) {

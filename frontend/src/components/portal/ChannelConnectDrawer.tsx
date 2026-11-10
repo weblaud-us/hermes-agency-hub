@@ -1,8 +1,8 @@
 "use client";
 
-import { motion } from "motion/react";
-import { CheckCircle2, CircleAlert, KeyRound, LoaderCircle, QrCode, RotateCw, Send, Shuffle, X } from "lucide-react";
+import { CheckCircle2, CircleAlert, KeyRound, LoaderCircle, RotateCw, Send, Shuffle, X } from "lucide-react";
 import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
+import { WhatsAppQrPanel } from "@/components/portal/WhatsAppQr";
 import { Dialog } from "@/components/ui/Dialog";
 import { SecretInput } from "@/components/ui/SecretInput";
 import { Segmented } from "@/components/ui/Segmented";
@@ -15,8 +15,7 @@ import type {
   IntegrationTestResult,
   SecretStatus,
 } from "@/lib/knowledge-api";
-import { SPRING } from "@/lib/motion";
-import type { PortalClient } from "@/lib/portal-api";
+import type { ChannelStatus, PortalClient } from "@/lib/portal-api";
 import { cn } from "@/lib/utils";
 
 export type ConnectTarget = "whatsapp" | "telegram" | "meta" | "ai";
@@ -43,10 +42,8 @@ interface DrawerProps {
   onClose: () => void;
   /** Called after a save, so the channel cards refresh. */
   onChanged: () => void;
-  /** Opens the existing QR pairing dialog for WhatsApp. */
-  onOpenQr: () => void;
-  /** The QR flow only starts for a channel the account manager has already enabled. */
-  qrAvailable: boolean;
+  /** A live, connected number is not re-linked from here; the channel card handles a lapse. */
+  whatsappStatus: ChannelStatus;
 }
 
 export function ChannelConnectDrawer({ target, onClose, ...rest }: DrawerProps) {
@@ -97,7 +94,7 @@ function randomPhrase(): string {
 }
 
 // ------------------------------------------------------------------------- body
-function Body({ client, target, onClose, onChanged, onOpenQr, qrAvailable }: Omit<DrawerProps, "target"> & { target: ConnectTarget }) {
+function Body({ client, target, onClose, onChanged, whatsappStatus }: Omit<DrawerProps, "target"> & { target: ConnectTarget }) {
   const base = useId();
   const [view, setView] = useState<IntegrationsView | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -160,8 +157,8 @@ function Body({ client, target, onClose, onChanged, onOpenQr, qrAvailable }: Omi
             setView(result.integrations);
             onChanged();
           }}
-          onOpenQr={onOpenQr}
-          qrAvailable={qrAvailable}
+          onChanged={onChanged}
+          whatsappStatus={whatsappStatus}
         />
       )}
     </div>
@@ -174,16 +171,16 @@ function Panel({
   target,
   view,
   onSaved,
-  onOpenQr,
-  qrAvailable,
+  onChanged,
+  whatsappStatus,
 }: {
   base: string;
   client: PortalClient;
   target: ConnectTarget;
   view: IntegrationsView;
   onSaved: (result: IntegrationsSaveResult) => void;
-  onOpenQr: () => void;
-  qrAvailable: boolean;
+  onChanged: () => void;
+  whatsappStatus: ChannelStatus;
 }) {
   // ---- form state, one set of fields per target, all held here so Save sees them
   const [tgToken, setTgToken] = useState("");
@@ -341,20 +338,11 @@ function Panel({
                 <p className="rounded-xl border border-white/8 bg-white/3 p-3 text-xs leading-relaxed text-ink-3">
                   Best for getting started quickly. The phone stays your business number, and replies come from it. {view.whatsapp.qr_linked ? "A phone is linked now." : "No phone is linked yet."}
                 </p>
-                {qrAvailable ? (
-                  <motion.button
-                    type="button"
-                    whileTap={{ scale: 0.97 }}
-                    transition={SPRING}
-                    onClick={onOpenQr}
-                    className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-signal px-4 text-sm font-semibold text-obsidian"
-                  >
-                    <QrCode aria-hidden className="size-4" />
-                    Show the QR code
-                  </motion.button>
+                {whatsappStatus !== "connected" || client.mode === "mock" ? (
+                  <WhatsAppQrPanel client={client} onChanged={onChanged} />
                 ) : (
-                  <p role="status" className="rounded-xl border border-warn/30 bg-warn/8 p-3 text-xs leading-relaxed text-ink-2">
-                    QR linking is switched on by your account manager for each business. Ask them to enable it, or use the WhatsApp Cloud API tab, which you can set up yourself.
+                  <p role="status" className="rounded-xl border border-signal/25 bg-signal/8 p-3 text-xs leading-relaxed text-ink-2">
+                    A phone is linked and online. If WhatsApp ever stops answering, the channel card will offer a new QR code.
                   </p>
                 )}
               </>

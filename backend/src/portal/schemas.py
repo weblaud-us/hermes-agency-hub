@@ -97,6 +97,8 @@ class ReconnectResult(BaseModel):
     state: ReconnectState
     #: PNG of the WhatsApp pairing QR, base64-encoded, while ``state`` is ``qr_ready``.
     qr_png_base64: str | None = None
+    #: The same code as rows of ``0``/``1`` modules, for drawing it as SVG.
+    qr_matrix: list[str] | None = None
     #: Seconds until this QR is replaced by a newer one.
     qr_refresh_seconds: int | None = None
     detail: str

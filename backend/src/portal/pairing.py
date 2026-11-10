@@ -55,6 +55,15 @@ class PairingSession:
         segno.make(self.qr_payload, error="l").save(buffer, kind="png", scale=8, border=2)
         return base64.b64encode(buffer.getvalue()).decode("ascii")
 
+    def qr_matrix(self) -> list[str] | None:
+        """The code as rows of ``0``/``1`` modules, without a quiet zone.
+
+        Lets the portal draw it as vector graphics, which stays sharp at any size.
+        """
+        if not self.qr_payload:
+            return None
+        return ["".join("1" if module else "0" for module in row) for row in segno.make(self.qr_payload, error="l").matrix]
+
     def seconds_until_refresh(self) -> int:
         age = time.monotonic() - self.qr_updated_at
         return max(0, round(QR_ROTATION_SECONDS - age))

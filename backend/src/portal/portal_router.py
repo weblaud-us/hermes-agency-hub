@@ -290,6 +290,7 @@ def _pairing_result(session: PairingSession) -> ReconnectResult:
         channel="whatsapp",
         state=session.state,  # type: ignore[arg-type]
         qr_png_base64=session.qr_png_base64() if session.state == "qr_ready" else None,
+        qr_matrix=session.qr_matrix() if session.state == "qr_ready" else None,
         qr_refresh_seconds=session.seconds_until_refresh() if session.state == "qr_ready" else None,
         detail=details[session.state],
     )
@@ -311,14 +312,16 @@ async def reconnect_channel(
     listing = await asyncio.to_thread(readers.read_channels, client, files)
     current = next(item for item in listing if item.channel == channel)
 
-    if current.status == "not_configured":
+    # A first WhatsApp link is a pairing too, so it is not turned away when enabled.
+    first_link = channel == "whatsapp" and settings.whatsapp_pairing_enabled
+    if current.status == "not_configured" and not first_link:
         return ReconnectResult(
             channel=channel,
             state="failed",
             detail="This channel has not been set up yet. Your account manager can enable it.",
         )
 
-    if channel == "whatsapp" and current.status in {"action_needed", "disconnected"}:
+    if channel == "whatsapp" and current.status in {"action_needed", "disconnected", "not_configured"}:
         pairing = await asyncio.to_thread(pairing_registry.start, client, docker, settings)
         await _audit(session, client, "portal.channel.relink", "Owner started WhatsApp re-link.")
         return _pairing_result(pairing)

@@ -62,6 +62,8 @@ export interface ReconnectResult {
   state: ReconnectState;
   /** Base64 PNG of a real pairing code. Null in sample mode, which draws a marked placeholder. */
   qrPngBase64: string | null;
+  /** The same code as rows of "0"/"1" modules, drawn as SVG. Sample mode supplies a marked placeholder. */
+  qrMatrix: string[] | null;
   qrRefreshSeconds: number | null;
   detail: string;
 }
@@ -408,6 +410,8 @@ export interface PortalClient {
   channels(): Promise<PortalChannel[]>;
   reconnectChannel(channel: ChannelName): Promise<ReconnectResult>;
   pairingStatus(): Promise<ReconnectResult>;
+  /** Sample mode only: stands in for the owner scanning the code, so the linking flow can be demonstrated. */
+  simulatePhoneScan?(): Promise<ReconnectResult>;
   testChannel(channel: ChannelName): Promise<ChannelTestResult>;
   updateAllowlist(channel: ChannelName, change: { add?: string[]; removeIds?: string[] }): Promise<PortalChannel[]>;
   cronFeed(): Promise<CronFeed>;
@@ -450,6 +454,7 @@ interface ChannelWire {
 interface ReconnectWire {
   state: ReconnectState;
   qr_png_base64: string | null;
+  qr_matrix?: string[] | null;
   qr_refresh_seconds: number | null;
   detail: string;
 }
@@ -510,6 +515,7 @@ const toChannel = (wire: ChannelWire): PortalChannel => ({
 const toReconnect = (wire: ReconnectWire): ReconnectResult => ({
   state: wire.state,
   qrPngBase64: wire.qr_png_base64,
+  qrMatrix: wire.qr_matrix ?? null,
   qrRefreshSeconds: wire.qr_refresh_seconds,
   detail: wire.detail,
 });
